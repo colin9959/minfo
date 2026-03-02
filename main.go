@@ -1,10 +1,12 @@
 package main
 
 import (
+    "context"
     "embed"
     "io/fs"
     "log"
     "net/http"
+    "time"
 )
 
 //go:embed webui/dist/*
@@ -12,6 +14,11 @@ var staticFS embed.FS
 
 func main() {
     port := getenv("PORT", defaultPort)
+    preloadCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    if err := loadUDFModule(preloadCtx); err != nil {
+        log.Printf("udf auto-load skipped: %v", err)
+    }
+    cancel()
 
     sub, err := fs.Sub(staticFS, "webui/dist")
     if err != nil {

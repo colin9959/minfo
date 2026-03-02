@@ -396,6 +396,7 @@ func mountISO(ctx context.Context, isoPath string) (string, func(), error) {
     mountCtx, cancel := context.WithTimeout(ctx, mountTimeout)
     defer cancel()
 
+    modErr := loadUDFModule(mountCtx)
     _, stderr, err := runCommand(mountCtx, mountBin, "-o", "loop,ro", isoPath, mountDir)
     if err != nil {
         msg := strings.TrimSpace(stderr)
@@ -421,7 +422,7 @@ func mountISO(ctx context.Context, isoPath string) (string, func(), error) {
         }
 
         _ = os.RemoveAll(mountDir)
-        return "", noop, fmt.Errorf("mount iso failed: %s", explainISOmountError(msg))
+        return "", noop, fmt.Errorf("mount iso failed: %s", explainISOmountError(msg, modErr))
     }
 
     cleanup := buildMountCleanup(mountDir, umountBin)
@@ -429,8 +430,11 @@ func mountISO(ctx context.Context, isoPath string) (string, func(), error) {
     return mountDir, cleanup, nil
 }
 
-func explainISOmountError(message string) string {
+func explainISOmountError(message string, modErr error) string {
     if isUnknownUDFMountError(message) {
+        if modErr != nil {
+            return message + "; auto `modprobe udf` failed: " + modErr.Error() + ". Ensure host supports udf and mount `/lib/modules:/lib/modules:ro` into container"
+        }
         return message + "; attempted auto `modprobe udf`, please check host kernel module availability"
     }
     return message

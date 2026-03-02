@@ -18,9 +18,11 @@ services:
     ports:
       - "28081:8080"
     environment:
+      PORT: "8080"
       WEB_PASSWORD: "adminadmin"
       REQUEST_TIMEOUT: "20m"
     volumes:
+      - /lib/modules:/lib/modules:ro # 程序会自动尝试加载 `udf` 内核模块用于挂载ISO
       - /your/media/path1:/media_path1:ro
       - /your/media/path2:/media_path2:ro
       - /your/media/path3:/media_path3:ro
@@ -36,4 +38,3 @@ docker compose up -d
 
 访问：
 - `http://localhost:28081`
-
