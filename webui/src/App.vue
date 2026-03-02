@@ -79,7 +79,7 @@
             <div class="actions">
                 <button :disabled="busy" @click="runInfo('/api/mediainfo', 'MediaInfo')">生成 MediaInfo</button>
                 <button :disabled="busy" @click="runInfo('/api/bdinfo', 'BDInfo')">生成 BDInfo</button>
-                <button :disabled="busy" @click="downloadShots">下载 8 张截图</button>
+                <button :disabled="busy" @click="downloadShots">下载 4 张截图</button>
             </div>
         </section>
 

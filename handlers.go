@@ -401,7 +401,7 @@ func captureShotsConcurrent(ctx context.Context, ffmpeg, path string, stamps []f
 }
 
 func calcTimestamps(duration float64) []float64 {
-    const shots = 8
+    const shots = 4
     if duration <= 0 {
         return nil
     }
