@@ -205,6 +205,8 @@ input[type="text"] {
   padding: 8px 10px;
   border-radius: 10px;
   cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .browser-row:not(.empty):hover {
