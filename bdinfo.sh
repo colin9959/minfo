@@ -12,18 +12,29 @@ case "$input" in
   *) input="$(pwd)/$input" ;;
 esac
 
-# Force BDInfo to scan one explicit BDMV folder, avoiding parent-folder multi-disc scan
-# that may attempt writing reports beside source media (read-only mounts).
-if [ -d "$input/BDMV" ]; then
-  input="$input/BDMV"
-fi
-
 out_dir="$(mktemp -d)"
 log_file="$(mktemp)"
 bound_input=""
 
 scan_input="$input"
-if [ -d "$input" ]; then
+source_bdmv=""
+if [ -d "$input/BDMV" ]; then
+  source_bdmv="$input/BDMV"
+elif [ -d "$input" ] && [ "$(basename "$input")" = "BDMV" ]; then
+  source_bdmv="$input"
+fi
+
+if [ -n "$source_bdmv" ]; then
+  bind_dir="$out_dir/source"
+  bind_target="$bind_dir/BDMV"
+  mkdir -p "$bind_target"
+  if mount --bind "$source_bdmv" "$bind_target" >/dev/null 2>&1; then
+    scan_input="$bind_dir"
+    bound_input="$bind_target"
+  elif rmdir "$bind_target" >/dev/null 2>&1 && ln -s "$source_bdmv" "$bind_target" >/dev/null 2>&1; then
+    scan_input="$bind_dir"
+  fi
+elif [ -d "$input" ]; then
   bind_dir="$out_dir/source"
   mkdir -p "$bind_dir"
   if mount --bind "$input" "$bind_dir" >/dev/null 2>&1; then
