@@ -5,40 +5,47 @@
             <div>
                 <p class="kicker">本地媒体检测</p>
                 <h1>minfo</h1>
-                <p class="lead">一键生成 MediaInfo / BDInfo，并下载 8 张截图。</p>
+                <p class="lead">一键生成 MediaInfo / BDInfo，一键截图。</p>
             </div>
         </header>
 
         <section class="panel">
             <div class="field">
-                <label for="path-search">媒体路径</label>
+                <label for="path-search">媒体选择</label>
                 <div class="path-picker">
                     <div class="browser integrated">
                         <div class="browser-toolbar">
                             <div class="browser-current">{{ browserDir || "可用挂载路径" }}</div>
-                            <div class="browser-buttons">
-                                <button class="ghost" :disabled="busy || browserLoading || !canNavigateUp" @click="navigateUp">上一级</button>
-                                <button class="ghost" :disabled="busy || browserLoading" @click="refreshBrowser">刷新</button>
-                                <button class="ghost" :disabled="busy || browserLoading || !browserDir" @click="chooseCurrentDir">选择当前目录</button>
-                                <button class="ghost" :disabled="busy || path.trim() === ''" @click="clearPath">清空路径</button>
-                            </div>
                         </div>
 
                         <div class="browser-search">
-                            <span class="path-icon">📁</span>
+                            <div class="search-actions">
+                                <button
+                                    class="ghost icon-btn"
+                                    :disabled="busy || browserLoading || !canNavigateUp"
+                                    title="上一级"
+                                    aria-label="上一级"
+                                    @click="navigateUp"
+                                >
+                                    ⬆
+                                </button>
+                                <button
+                                    class="ghost icon-btn"
+                                    :disabled="busy || browserLoading"
+                                    title="刷新"
+                                    aria-label="刷新"
+                                    @click="refreshBrowser"
+                                >
+                                    ↻
+                                </button>
+                            </div>
                             <input
                                 id="path-search"
                                 type="text"
                                 v-model="searchKeyword"
-                                placeholder="模糊搜索当前目录（双击目录进入）"
+                                placeholder="模糊搜索当前目录"
                             />
                         </div>
-
-                        <div class="path-selected-value" :class="{ empty: path.trim() === '' }">
-                            {{ path.trim() === '' ? "未选择路径" : `已选择: ${path}` }}
-                        </div>
-
-                        <div class="path-hint">单击条目即可选择路径；目录支持双击进入，文件可直接分析。</div>
 
                         <div class="browser-error" v-if="browserError !== ''">
                             {{ browserError }}
@@ -63,11 +70,6 @@
                                 @dblclick="handleEntryDoubleClick(entry)"
                             >
                                 <span class="browser-row-name">{{ entry.isDir ? `📁 ${entry.name}` : `📄 ${entry.name}` }}</span>
-                                <div class="browser-row-actions">
-                                    <button class="ghost" :disabled="busy || browserLoading" @click.stop="choosePath(entry.path)">
-                                        {{ entry.isDir ? "选择文件夹" : "选择文件" }}
-                                    </button>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -91,10 +93,6 @@
             </div>
             <pre>{{ output }}</pre>
         </section>
-
-        <footer class="footer">
-            <p>浏览并选择媒体文件或文件夹后，再执行分析或截图任务。</p>
-        </footer>
     </main>
 </template>
 
@@ -153,10 +151,6 @@ const filteredEntries = computed(() => {
         return name.includes(keyword) || full.includes(keyword);
     });
 });
-
-const clearPath = () => {
-    path.value = "";
-};
 
 const withTrailingSeparator = (value) => {
     if (value === "") {
@@ -320,13 +314,6 @@ const refreshBrowser = async () => {
 
 const choosePath = (value) => {
     path.value = value;
-};
-
-const chooseCurrentDir = () => {
-    if (browserDir.value === "") {
-        return;
-    }
-    path.value = browserDir.value;
 };
 
 const handleEntryDoubleClick = async (entry) => {
