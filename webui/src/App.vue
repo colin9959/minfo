@@ -129,6 +129,8 @@ const browserLoading = ref(false);
 const browserError = ref("");
 const searchKeyword = ref("");
 let browserController = null;
+let screenshotDownloadFrame = null;
+let screenshotDownloadForm = null;
 
 const hasInput = () => path.value.trim() !== "";
 
@@ -371,93 +373,64 @@ const postForm = async (url, extras = {}) => {
     return fetch(url, { method: "POST", body: form });
 };
 
-const submitDownloadForm = (url, fields = {}) => {
-    return new Promise((resolve, reject) => {
-        const frameName = `download-frame-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        const iframe = document.createElement("iframe");
-        iframe.name = frameName;
-        iframe.style.display = "none";
+const ensureScreenshotDownloadTransport = () => {
+    if (screenshotDownloadFrame && screenshotDownloadForm) {
+        return;
+    }
 
-        const form = document.createElement("form");
-        form.method = "POST";
-        form.action = url;
-        form.target = frameName;
-        form.enctype = "multipart/form-data";
-        form.style.display = "none";
+    screenshotDownloadFrame = document.createElement("iframe");
+    screenshotDownloadFrame.name = "screenshot-download-frame";
+    screenshotDownloadFrame.style.display = "none";
 
-        const addField = (name, rawValue) => {
-            if (rawValue === undefined || rawValue === null) {
+    screenshotDownloadForm = document.createElement("form");
+    screenshotDownloadForm.method = "POST";
+    screenshotDownloadForm.target = screenshotDownloadFrame.name;
+    screenshotDownloadForm.enctype = "multipart/form-data";
+    screenshotDownloadForm.style.display = "none";
+
+    screenshotDownloadFrame.addEventListener("load", () => {
+        try {
+            const doc = screenshotDownloadFrame.contentDocument;
+            const text = (doc?.body?.textContent || "").trim();
+            if (text === "") {
                 return;
             }
-            const value = `${rawValue}`;
-            const input = document.createElement("input");
-            input.type = "hidden";
-            input.name = name;
-            input.value = value;
-            form.appendChild(input);
-        };
-
-        addField("path", path.value.trim());
-        for (const [key, value] of Object.entries(fields)) {
-            addField(key, value);
+            const data = JSON.parse(text);
+            if (data && data.ok === false) {
+                errorOutput(data.error || "截图请求失败。");
+            }
+        } catch (err) {
         }
-
-        let submitted = false;
-        let settled = false;
-
-        const cleanup = () => {
-            window.setTimeout(() => {
-                iframe.remove();
-                form.remove();
-            }, 0);
-        };
-
-        const finishResolve = () => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            cleanup();
-            resolve();
-        };
-
-        const finishReject = (message) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            cleanup();
-            reject(new Error(message));
-        };
-
-        const timer = window.setTimeout(() => {
-            finishResolve();
-        }, 1200);
-
-        iframe.addEventListener("load", () => {
-            if (!submitted || settled) {
-                return;
-            }
-            try {
-                const doc = iframe.contentDocument;
-                const text = (doc?.body?.textContent || "").trim();
-                if (text === "") {
-                    return;
-                }
-                const data = JSON.parse(text);
-                if (data && data.ok === false) {
-                    window.clearTimeout(timer);
-                    finishReject(data.error || "截图请求失败。");
-                }
-            } catch (err) {
-            }
-        });
-
-        document.body.appendChild(iframe);
-        document.body.appendChild(form);
-        submitted = true;
-        form.submit();
     });
+
+    document.body.appendChild(screenshotDownloadFrame);
+    document.body.appendChild(screenshotDownloadForm);
+};
+
+const submitDownloadForm = async (url, fields = {}) => {
+    ensureScreenshotDownloadTransport();
+
+    screenshotDownloadForm.action = url;
+    screenshotDownloadForm.replaceChildren();
+
+    const addField = (name, rawValue) => {
+        if (rawValue === undefined || rawValue === null) {
+            return;
+        }
+        const value = `${rawValue}`;
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = name;
+        input.value = value;
+        screenshotDownloadForm.appendChild(input);
+    };
+
+    addField("path", path.value.trim());
+    for (const [key, value] of Object.entries(fields)) {
+        addField(key, value);
+    }
+
+    screenshotDownloadForm.submit();
 };
 
 const runInfo = async (url, label) => {
@@ -548,5 +521,9 @@ onBeforeUnmount(() => {
     if (browserController) {
         browserController.abort();
     }
+    screenshotDownloadFrame?.remove();
+    screenshotDownloadForm?.remove();
+    screenshotDownloadFrame = null;
+    screenshotDownloadForm = null;
 });
 </script>
