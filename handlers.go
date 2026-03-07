@@ -362,7 +362,7 @@ func screenshotJPEGOptions(attempt screenshotCompressionAttempt) screenshotCaptu
 }
 
 func screenshotCompressionAttempts() []screenshotCompressionAttempt {
-    qualities := []int{4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30}
+    qualities := []int{2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30}
     attempts := make([]screenshotCompressionAttempt, 0, len(qualities)+25)
     for _, quality := range qualities {
         attempts = append(attempts, screenshotCompressionAttempt{Quality: quality, Scale: 1})
