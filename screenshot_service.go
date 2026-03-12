@@ -84,7 +84,6 @@ func resolveScript(envKey, fallbackName string) (string, error) {
 	if err == nil && !info.IsDir() {
 		return candidate, nil
 	}
-
 	return "", fmt.Errorf("%s not found in %s; set %s to override", fallbackName, screenshotScriptDir, envKey)
 }
 
@@ -141,7 +140,6 @@ func runScreenshotUpload(ctx context.Context, inputPath, outputDir, variant stri
 		}
 		return output, nil
 	}
-
 	return strings.Join(links, "\n"), nil
 }
 
@@ -189,15 +187,7 @@ func probeMediaDuration(ctx context.Context, ffprobe, path string) (float64, err
 	if value == "" {
 		return 0, errors.New("ffprobe returned empty duration")
 	}
-
-	duration, err := strconv.ParseFloat(value, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid duration: %v", err)
-	}
-	if duration <= 0 {
-		return 0, errors.New("duration must be positive")
-	}
-	return duration, nil
+	return strconv.ParseFloat(value, 64)
 }
 
 func buildRandomTimestampSeconds(duration float64, count int) []int {
@@ -284,14 +274,11 @@ func listScreenshotFiles(dir string) ([]string, error) {
 		if entry.IsDir() {
 			continue
 		}
-
-		ext := strings.ToLower(filepath.Ext(entry.Name()))
-		switch ext {
+		switch strings.ToLower(filepath.Ext(entry.Name())) {
 		case ".png", ".jpg", ".jpeg", ".gif", ".webp":
 			files = append(files, filepath.Join(dir, entry.Name()))
 		}
 	}
-
 	if len(files) == 0 {
 		return nil, errors.New("no screenshots were generated")
 	}
@@ -304,7 +291,6 @@ func extractDirectLinks(output string) []string {
 	lines := strings.Split(output, "\n")
 	links := make([]string, 0, len(lines))
 	seen := make(map[string]struct{}, len(lines))
-
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -322,6 +308,5 @@ func extractDirectLinks(output string) []string {
 		seen[line] = struct{}{}
 		links = append(links, line)
 	}
-
 	return links
 }

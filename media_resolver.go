@@ -17,12 +17,16 @@ var errNoVideo = errors.New("no video files found")
 
 const mediaInfoCandidateLimit = 5
 
+type videoCandidate struct {
+	path string
+	size int64
+}
+
 func resolveScreenshotSource(ctx context.Context, input string) (string, func(), error) {
 	info, err := os.Stat(input)
 	if err != nil {
 		return "", noop, err
 	}
-
 	if !info.IsDir() {
 		if isISOFile(input) {
 			return resolveM2TSFromMountedISO(ctx, input)
@@ -50,24 +54,6 @@ func resolveScreenshotSource(ctx context.Context, input string) (string, func(),
 	if err != nil {
 		return "", noop, err
 	}
-
-	return videoPath, noop, nil
-}
-
-func resolveMediaInfoSource(ctx context.Context, input string) (string, func(), error) {
-	info, err := os.Stat(input)
-	if err != nil {
-		return "", noop, err
-	}
-
-	if !info.IsDir() {
-		return input, noop, nil
-	}
-
-	videoPath, err := findVideoFile(input)
-	if err != nil {
-		return "", noop, err
-	}
 	return videoPath, noop, nil
 }
 
@@ -76,7 +62,6 @@ func resolveMediaInfoCandidates(ctx context.Context, input string, limit int) ([
 	if err != nil {
 		return nil, noop, err
 	}
-
 	if !info.IsDir() {
 		return []string{input}, noop, nil
 	}
@@ -93,7 +78,6 @@ func resolveBDInfoSource(ctx context.Context, input string) (string, func(), err
 	if err != nil {
 		return "", noop, err
 	}
-
 	if !info.IsDir() {
 		if isISOFile(input) {
 			return resolveBDInfoFromMountedISO(ctx, input)
@@ -133,10 +117,7 @@ func resolveBDInfoRoot(path string) (string, bool) {
 
 func resolveBDMVRoot(path string) (string, bool) {
 	base := filepath.Base(path)
-	if strings.EqualFold(base, "BDMV") {
-		return path, true
-	}
-	if strings.EqualFold(base, "STREAM") {
+	if strings.EqualFold(base, "BDMV") || strings.EqualFold(base, "STREAM") {
 		return path, true
 	}
 	bdmv := filepath.Join(path, "BDMV")
@@ -183,15 +164,11 @@ func findLargestM2TS(root string) (string, error) {
 
 	var largestPath string
 	var largestSize int64
-
 	err := filepath.WalkDir(searchRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
-			return nil
-		}
-		if !strings.EqualFold(filepath.Ext(path), ".m2ts") {
+		if d.IsDir() || !strings.EqualFold(filepath.Ext(path), ".m2ts") {
 			return nil
 		}
 		info, err := d.Info()
@@ -218,19 +195,16 @@ func resolveM2TSFromMountedISO(ctx context.Context, isoPath string) (string, fun
 	if err != nil {
 		return "", noop, err
 	}
-
 	bdmvRoot, ok := resolveBDMVRoot(mountDir)
 	if !ok {
 		cleanup()
 		return "", noop, errors.New("BDMV folder not found in ISO")
 	}
-
 	m2ts, err := findLargestM2TS(bdmvRoot)
 	if err != nil {
 		cleanup()
 		return "", noop, err
 	}
-
 	return m2ts, cleanup, nil
 }
 
@@ -239,20 +213,16 @@ func resolveBDInfoFromMountedISO(ctx context.Context, isoPath string) (string, f
 	if err != nil {
 		return "", noop, err
 	}
-
 	if _, ok := resolveBDInfoRoot(mountDir); !ok {
 		cleanup()
 		return "", noop, errors.New("BDMV folder not found in ISO")
 	}
-
 	return mountDir, cleanup, nil
 }
 
 func isVideoFile(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".m2ts", ".mts", ".mkv", ".mp4", ".m4v", ".mov", ".avi", ".wmv", ".flv",
-		".mpg", ".mpeg", ".m2v", ".ts", ".vob", ".webm":
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".m2ts", ".mts", ".mkv", ".mp4", ".m4v", ".mov", ".avi", ".wmv", ".flv", ".mpg", ".mpeg", ".m2v", ".ts", ".vob", ".webm":
 		return true
 	default:
 		return false
@@ -267,13 +237,8 @@ func findVideoFile(root string) (string, error) {
 
 	var bestPath string
 	var bestSize int64
-
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !isVideoFile(name) {
+		if entry.IsDir() || !isVideoFile(entry.Name()) {
 			continue
 		}
 		info, err := entry.Info()
@@ -282,20 +247,13 @@ func findVideoFile(root string) (string, error) {
 		}
 		if info.Size() > bestSize {
 			bestSize = info.Size()
-			bestPath = filepath.Join(root, name)
+			bestPath = filepath.Join(root, entry.Name())
 		}
 	}
-
 	if bestPath != "" {
 		return bestPath, nil
 	}
-
 	return findLargestVideoFile(root)
-}
-
-type videoCandidate struct {
-	path string
-	size int64
 }
 
 func findVideoCandidates(root string, limit int) ([]string, error) {
@@ -308,10 +266,7 @@ func findVideoCandidates(root string, limit int) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
-			return nil
-		}
-		if !isVideoFile(path) {
+		if d.IsDir() || !isVideoFile(path) {
 			return nil
 		}
 		info, err := d.Info()
@@ -334,14 +289,13 @@ func findVideoCandidates(root string, limit int) ([]string, error) {
 		}
 		return items[i].path < items[j].path
 	})
-
 	if limit > len(items) {
 		limit = len(items)
 	}
 
 	results := make([]string, 0, limit)
-	for i := 0; i < limit; i++ {
-		results = append(results, items[i].path)
+	for index := 0; index < limit; index++ {
+		results = append(results, items[index].path)
 	}
 	return results, nil
 }
@@ -349,15 +303,11 @@ func findVideoCandidates(root string, limit int) ([]string, error) {
 func findLargestVideoFile(root string) (string, error) {
 	var largestPath string
 	var largestSize int64
-
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
-			return nil
-		}
-		if !isVideoFile(path) {
+		if d.IsDir() || !isVideoFile(path) {
 			return nil
 		}
 		info, err := d.Info()
@@ -369,107 +319,11 @@ func findLargestVideoFile(root string) (string, error) {
 			largestPath = path
 		}
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return "", err
 	}
 	if largestPath == "" {
 		return "", fmt.Errorf("%w under directory: %s", errNoVideo, root)
 	}
 	return largestPath, nil
-}
-
-func mountISO(ctx context.Context, isoPath string) (string, func(), error) {
-	mountBin, err := resolveBin("MOUNT_BIN", "mount")
-	if err != nil {
-		return "", noop, err
-	}
-	umountBin, err := resolveBin("UMOUNT_BIN", "umount")
-	if err != nil {
-		return "", noop, err
-	}
-
-	mountDir, err := os.MkdirTemp("", "minfo-iso-mount-*")
-	if err != nil {
-		return "", noop, err
-	}
-
-	mountCtx, cancel := context.WithTimeout(ctx, mountTimeout)
-	defer cancel()
-
-	modErr := loadUDFModule(mountCtx)
-	_, stderr, err := runCommand(mountCtx, mountBin, "-o", "loop,ro", isoPath, mountDir)
-	if err != nil {
-		msg := strings.TrimSpace(stderr)
-		if msg == "" {
-			msg = err.Error()
-		}
-
-		if isUnknownUDFMountError(msg) {
-			if modErr := loadUDFModule(mountCtx); modErr == nil {
-				_, retryStderr, retryErr := runCommand(mountCtx, mountBin, "-o", "loop,ro", isoPath, mountDir)
-				if retryErr == nil {
-					cleanup := buildMountCleanup(mountDir, umountBin)
-					return mountDir, cleanup, nil
-				}
-
-				retryMsg := strings.TrimSpace(retryStderr)
-				if retryMsg == "" {
-					retryMsg = retryErr.Error()
-				}
-				_ = os.RemoveAll(mountDir)
-				return "", noop, fmt.Errorf("mount iso failed after modprobe udf: %s", retryMsg)
-			}
-		}
-
-		_ = os.RemoveAll(mountDir)
-		return "", noop, fmt.Errorf("mount iso failed: %s", explainISOmountError(msg, modErr))
-	}
-
-	cleanup := buildMountCleanup(mountDir, umountBin)
-
-	return mountDir, cleanup, nil
-}
-
-func explainISOmountError(message string, modErr error) string {
-	if isUnknownUDFMountError(message) {
-		if modErr != nil {
-			return message + "; auto `modprobe udf` failed: " + modErr.Error() + ". Ensure host supports udf and mount `/lib/modules:/lib/modules:ro` into container"
-		}
-		return message + "; attempted auto `modprobe udf`, please check host kernel module availability"
-	}
-	return message
-}
-
-func isUnknownUDFMountError(message string) bool {
-	lower := strings.ToLower(message)
-	return strings.Contains(lower, "unknown filesystem type 'udf'") || strings.Contains(lower, "unknown filesystem type \"udf\"")
-}
-
-func loadUDFModule(ctx context.Context) error {
-	modprobeBin, err := resolveBin("MODPROBE_BIN", "modprobe")
-	if err != nil {
-		return err
-	}
-
-	_, stderr, err := runCommand(ctx, modprobeBin, "udf")
-	if err != nil {
-		msg := strings.TrimSpace(stderr)
-		if msg == "" {
-			msg = err.Error()
-		}
-		return fmt.Errorf("modprobe udf failed: %s", msg)
-	}
-	return nil
-}
-
-func buildMountCleanup(mountDir, umountBin string) func() {
-	return func() {
-		umountCtx, cancel := context.WithTimeout(context.Background(), umountTimeout)
-		defer cancel()
-		if _, _, err := runCommand(umountCtx, umountBin, mountDir); err != nil {
-			_, _, _ = runCommand(umountCtx, umountBin, "-l", mountDir)
-		}
-		_ = os.RemoveAll(mountDir)
-	}
 }
