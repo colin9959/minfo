@@ -1,4 +1,4 @@
-package main
+package middleware
 
 import (
 	"encoding/base64"
@@ -8,9 +8,12 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"minfo/internal/config"
+	"minfo/internal/httpapi/transport"
 )
 
-func logging(next http.Handler) http.Handler {
+func Logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
@@ -18,8 +21,8 @@ func logging(next http.Handler) http.Handler {
 	})
 }
 
-func authenticate(next http.Handler) http.Handler {
-	password := getenv("WEB_PASSWORD", "")
+func Authenticate(next http.Handler) http.Handler {
+	password := config.Getenv("WEB_PASSWORD", "")
 	if password == "" {
 		return next
 	}
@@ -28,7 +31,7 @@ func authenticate(next http.Handler) http.Handler {
 		_, pass, ok := parseBasicAuth(r.Header.Get("Authorization"))
 		if !ok || pass != password {
 			w.Header().Set("WWW-Authenticate", "Basic realm=\"minfo\"")
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			transport.WriteError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		next.ServeHTTP(w, r)

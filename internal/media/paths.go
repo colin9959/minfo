@@ -1,4 +1,4 @@
-package main
+package media
 
 import (
 	"errors"
@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func suggestPaths(roots []string, prefix string, limit int) ([]string, string, error) {
+func SuggestPaths(roots []string, prefix string, limit int) ([]string, string, error) {
 	if len(roots) == 0 {
 		return nil, "", errors.New("no MEDIA_ROOT configured")
 	}
@@ -61,7 +61,7 @@ func suggestPaths(roots []string, prefix string, limit int) ([]string, string, e
 	return items, selectedRoot, err
 }
 
-func resolveRoots(roots []string) ([]string, error) {
+func ResolveRoots(roots []string) ([]string, error) {
 	resolved := make([]string, 0, len(roots))
 	seen := make(map[string]struct{}, len(roots))
 	for _, root := range roots {

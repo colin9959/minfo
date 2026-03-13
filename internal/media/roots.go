@@ -1,17 +1,19 @@
-package main
+package media
 
 import (
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"minfo/internal/config"
 )
 
-func mediaRoots() []string {
+func MediaRoots() []string {
 	if roots := detectMountedRoots(); len(roots) > 0 {
 		return roots
 	}
-	return []string{defaultRoot}
+	return []string{config.DefaultRoot}
 }
 
 func detectMountedRoots() []string {

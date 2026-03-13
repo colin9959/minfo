@@ -20,11 +20,13 @@ FROM --platform=$BUILDPLATFORM golang:1.22-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 COPY *.go ./
+COPY cmd ./cmd
+COPY internal ./internal
 COPY --from=webui /app/dist ./webui/dist
 ARG TARGETOS
 ARG TARGETARCH
 ENV CGO_ENABLED=0
-RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -buildvcs=false -ldflags="-s -w" -o /out/minfo
+RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -buildvcs=false -ldflags="-s -w" -o /out/minfo ./cmd/minfo
 
 # 构建 BDInfo (.NET)
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:9.0-alpine AS bdinfo-build

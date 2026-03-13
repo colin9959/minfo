@@ -1,4 +1,4 @@
-package main
+package screenshot
 
 import (
 	"archive/zip"
@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 )
 
-func zipFiles(paths []string) ([]byte, error) {
+func ZipFiles(paths []string) ([]byte, error) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 

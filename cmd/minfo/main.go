@@ -1,9 +1,14 @@
 package main
 
-import "log"
+import (
+	"log"
+
+	"minfo"
+	"minfo/internal/app"
+)
 
 func main() {
-	server, err := newServer()
+	server, err := app.NewServer(minfo.EmbeddedWebUI())
 	if err != nil {
 		log.Fatal(err)
 	}

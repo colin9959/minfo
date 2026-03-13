@@ -1,21 +1,24 @@
-package main
+package system
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
+
+	"minfo/internal/config"
 )
 
-func resolveBin(envKey, fallback string) (string, error) {
-	bin := getenv(envKey, fallback)
+func ResolveBin(envKey, fallback string) (string, error) {
+	bin := config.Getenv(envKey, fallback)
 	if _, err := exec.LookPath(bin); err != nil {
 		return "", fmt.Errorf("%s not found; set %s or add to PATH", bin, envKey)
 	}
 	return bin, nil
 }
 
-func runCommand(ctx context.Context, bin string, args ...string) (string, string, error) {
+func RunCommand(ctx context.Context, bin string, args ...string) (string, string, error) {
 	cmd := exec.Command(bin, args...)
 	setCommandProcessGroup(cmd)
 
@@ -57,4 +60,26 @@ func runCommand(ctx context.Context, bin string, args ...string) (string, string
 	stdoutData, _ := os.ReadFile(stdoutFile.Name())
 	stderrData, _ := os.ReadFile(stderrFile.Name())
 	return string(stdoutData), string(stderrData), waitErr
+}
+
+func BestErrorMessage(err error, stderr, stdout string) string {
+	msg := strings.TrimSpace(stderr)
+	if msg == "" {
+		msg = err.Error()
+	}
+	if strings.TrimSpace(stdout) != "" {
+		msg += "\n\n" + strings.TrimSpace(stdout)
+	}
+	return msg
+}
+
+func CombineCommandOutput(stdout, stderr string) string {
+	output := strings.TrimSpace(stdout)
+	if strings.TrimSpace(stderr) != "" {
+		if output != "" {
+			output += "\n\n"
+		}
+		output += strings.TrimSpace(stderr)
+	}
+	return output
 }

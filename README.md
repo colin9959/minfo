@@ -6,6 +6,20 @@
 - 使用 Seedbox 截图脚本生成 4 张截图压缩包
 - 直接输出 Pixhost 图床链接
 
+## 项目结构
+
+- `cmd/minfo`：可执行程序入口
+- `assets.go`：嵌入前端静态资源并向应用层提供文件系统
+- `internal/app`：HTTP 服务组装与启动
+- `internal/httpapi`：API 路由入口
+- `internal/httpapi/handlers`：接口处理器
+- `internal/httpapi/middleware`：认证与日志中间件
+- `internal/httpapi/transport`：请求解析、响应输出、DTO
+- `internal/media`：媒体路径解析、ISO 挂载、根目录与候选文件发现
+- `internal/screenshot`：截图脚本调度、随机时间点生成、打包压缩
+- `internal/system`：外部命令执行与进程组回收
+- `webui`：前端界面
+
 ## Docker 运行
 
 示例 `docker-compose.yml`：

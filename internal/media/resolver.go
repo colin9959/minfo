@@ -1,4 +1,4 @@
-package main
+package media
 
 import (
 	"context"
@@ -17,29 +17,31 @@ var errNoVideo = errors.New("no video files found")
 
 const mediaInfoCandidateLimit = 5
 
+const MediaInfoCandidateLimit = mediaInfoCandidateLimit
+
 type videoCandidate struct {
 	path string
 	size int64
 }
 
-func resolveScreenshotSource(ctx context.Context, input string) (string, func(), error) {
+func ResolveScreenshotSource(ctx context.Context, input string) (string, func(), error) {
 	info, err := os.Stat(input)
 	if err != nil {
-		return "", noop, err
+		return "", func() {}, err
 	}
 	if !info.IsDir() {
 		if isISOFile(input) {
 			return resolveM2TSFromMountedISO(ctx, input)
 		}
-		return input, noop, nil
+		return input, func() {}, nil
 	}
 
 	if bdmvRoot, ok := resolveBDMVRoot(input); ok {
 		m2ts, err := findLargestM2TS(bdmvRoot)
 		if err != nil {
-			return "", noop, err
+			return "", func() {}, err
 		}
-		return m2ts, noop, nil
+		return m2ts, func() {}, nil
 	}
 
 	isoPath, err := findISOInDir(input)
@@ -47,46 +49,46 @@ func resolveScreenshotSource(ctx context.Context, input string) (string, func(),
 		return resolveM2TSFromMountedISO(ctx, isoPath)
 	}
 	if !errors.Is(err, errNoISO) {
-		return "", noop, err
+		return "", func() {}, err
 	}
 
 	videoPath, err := findVideoFile(input)
 	if err != nil {
-		return "", noop, err
+		return "", func() {}, err
 	}
-	return videoPath, noop, nil
+	return videoPath, func() {}, nil
 }
 
-func resolveMediaInfoCandidates(ctx context.Context, input string, limit int) ([]string, func(), error) {
+func ResolveMediaInfoCandidates(ctx context.Context, input string, limit int) ([]string, func(), error) {
 	info, err := os.Stat(input)
 	if err != nil {
-		return nil, noop, err
+		return nil, func() {}, err
 	}
 	if !info.IsDir() {
-		return []string{input}, noop, nil
+		return []string{input}, func() {}, nil
 	}
 
 	candidates, err := findVideoCandidates(input, limit)
 	if err != nil {
-		return nil, noop, err
+		return nil, func() {}, err
 	}
-	return candidates, noop, nil
+	return candidates, func() {}, nil
 }
 
-func resolveBDInfoSource(ctx context.Context, input string) (string, func(), error) {
+func ResolveBDInfoSource(ctx context.Context, input string) (string, func(), error) {
 	info, err := os.Stat(input)
 	if err != nil {
-		return "", noop, err
+		return "", func() {}, err
 	}
 	if !info.IsDir() {
 		if isISOFile(input) {
 			return resolveBDInfoFromMountedISO(ctx, input)
 		}
-		return "", noop, errors.New("path must be a folder containing BDMV or ISO")
+		return "", func() {}, errors.New("path must be a folder containing BDMV or ISO")
 	}
 
 	if bdmvRoot, ok := resolveBDInfoRoot(input); ok {
-		return bdmvRoot, noop, nil
+		return bdmvRoot, func() {}, nil
 	}
 
 	isoPath, err := findISOInDir(input)
@@ -94,10 +96,10 @@ func resolveBDInfoSource(ctx context.Context, input string) (string, func(), err
 		return resolveBDInfoFromMountedISO(ctx, isoPath)
 	}
 	if !errors.Is(err, errNoISO) {
-		return "", noop, err
+		return "", func() {}, err
 	}
 
-	return "", noop, errors.New("path does not contain BDMV or BDISO content")
+	return "", func() {}, errors.New("path does not contain BDMV or BDISO content")
 }
 
 func resolveBDInfoRoot(path string) (string, bool) {
@@ -193,17 +195,17 @@ func findLargestM2TS(root string) (string, error) {
 func resolveM2TSFromMountedISO(ctx context.Context, isoPath string) (string, func(), error) {
 	mountDir, cleanup, err := mountISO(ctx, isoPath)
 	if err != nil {
-		return "", noop, err
+		return "", func() {}, err
 	}
 	bdmvRoot, ok := resolveBDMVRoot(mountDir)
 	if !ok {
 		cleanup()
-		return "", noop, errors.New("BDMV folder not found in ISO")
+		return "", func() {}, errors.New("BDMV folder not found in ISO")
 	}
 	m2ts, err := findLargestM2TS(bdmvRoot)
 	if err != nil {
 		cleanup()
-		return "", noop, err
+		return "", func() {}, err
 	}
 	return m2ts, cleanup, nil
 }
@@ -211,11 +213,11 @@ func resolveM2TSFromMountedISO(ctx context.Context, isoPath string) (string, fun
 func resolveBDInfoFromMountedISO(ctx context.Context, isoPath string) (string, func(), error) {
 	mountDir, cleanup, err := mountISO(ctx, isoPath)
 	if err != nil {
-		return "", noop, err
+		return "", func() {}, err
 	}
 	if _, ok := resolveBDInfoRoot(mountDir); !ok {
 		cleanup()
-		return "", noop, errors.New("BDMV folder not found in ISO")
+		return "", func() {}, errors.New("BDMV folder not found in ISO")
 	}
 	return mountDir, cleanup, nil
 }

@@ -1,12 +1,12 @@
-package main
+package transport
 
-type infoResponse struct {
+type InfoResponse struct {
 	OK     bool   `json:"ok"`
 	Output string `json:"output,omitempty"`
 	Error  string `json:"error,omitempty"`
 }
 
-type pathResponse struct {
+type PathResponse struct {
 	OK    bool     `json:"ok"`
 	Root  string   `json:"root,omitempty"`
 	Roots []string `json:"roots,omitempty"`

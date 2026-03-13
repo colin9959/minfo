@@ -1,4 +1,4 @@
-package main
+package screenshot
 
 import (
 	"context"
@@ -11,45 +11,48 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"minfo/internal/media"
+	"minfo/internal/system"
 )
 
 const screenshotScriptDir = "/opt/minfo/scripts"
 const screenshotCount = 4
 
 const (
-	screenshotModeZip   = "zip"
-	screenshotModeLinks = "links"
+	ModeZip   = "zip"
+	ModeLinks = "links"
 
-	screenshotVariantPNG  = "png"
-	screenshotVariantJPG  = "jpg"
-	screenshotVariantFast = "fast"
+	VariantPNG  = "png"
+	VariantJPG  = "jpg"
+	VariantFast = "fast"
 )
 
-func requestedScreenshotMode(raw string) string {
+func NormalizeMode(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case screenshotModeLinks:
-		return screenshotModeLinks
+	case ModeLinks:
+		return ModeLinks
 	default:
-		return screenshotModeZip
+		return ModeZip
 	}
 }
 
-func requestedScreenshotVariant(raw string) string {
+func NormalizeVariant(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case screenshotVariantJPG:
-		return screenshotVariantJPG
-	case screenshotVariantFast:
-		return screenshotVariantFast
+	case VariantJPG:
+		return VariantJPG
+	case VariantFast:
+		return VariantFast
 	default:
-		return screenshotVariantPNG
+		return VariantPNG
 	}
 }
 
 func screenshotVariantArgs(variant string) []string {
 	switch variant {
-	case screenshotVariantJPG:
+	case VariantJPG:
 		return []string{"-jpg"}
-	case screenshotVariantFast:
+	case VariantFast:
 		return []string{"-fast"}
 	default:
 		return nil
@@ -58,9 +61,9 @@ func screenshotVariantArgs(variant string) []string {
 
 func screenshotScriptName(variant string) string {
 	switch variant {
-	case screenshotVariantJPG:
+	case VariantJPG:
 		return "screenshots_jpg.sh"
-	case screenshotVariantFast:
+	case VariantFast:
 		return "screenshots_fast.sh"
 	default:
 		return "screenshots.sh"
@@ -87,7 +90,7 @@ func resolveScript(envKey, fallbackName string) (string, error) {
 	return "", fmt.Errorf("%s not found in %s; set %s to override", fallbackName, screenshotScriptDir, envKey)
 }
 
-func runScreenshotScript(ctx context.Context, inputPath, outputDir, variant string) ([]string, error) {
+func RunScript(ctx context.Context, inputPath, outputDir, variant string) ([]string, error) {
 	scriptPath, err := resolveScript("SCREENSHOT_SCRIPT", screenshotScriptName(variant))
 	if err != nil {
 		return nil, err
@@ -99,9 +102,9 @@ func runScreenshotScript(ctx context.Context, inputPath, outputDir, variant stri
 	}
 
 	args := append([]string{scriptPath, inputPath, outputDir}, timestamps...)
-	stdout, stderr, err := runCommand(ctx, "bash", args...)
+	stdout, stderr, err := system.RunCommand(ctx, "bash", args...)
 	if err != nil {
-		return nil, fmt.Errorf("screenshot generation failed: %s", bestErrorMessage(err, stderr, stdout))
+		return nil, fmt.Errorf("screenshot generation failed: %s", system.BestErrorMessage(err, stderr, stdout))
 	}
 
 	files, err := listScreenshotFiles(outputDir)
@@ -111,7 +114,7 @@ func runScreenshotScript(ctx context.Context, inputPath, outputDir, variant stri
 	return files, nil
 }
 
-func runScreenshotUpload(ctx context.Context, inputPath, outputDir, variant string) (string, error) {
+func RunUpload(ctx context.Context, inputPath, outputDir, variant string) (string, error) {
 	autoScript, err := resolveScript("SCREENSHOT_AUTO_SCRIPT", "AutoScreenshot.sh")
 	if err != nil {
 		return "", err
@@ -124,9 +127,9 @@ func runScreenshotUpload(ctx context.Context, inputPath, outputDir, variant stri
 
 	args := append(screenshotVariantArgs(variant), inputPath, outputDir)
 	args = append(args, timestamps...)
-	stdout, stderr, err := runCommand(ctx, "bash", append([]string{autoScript}, args...)...)
+	stdout, stderr, err := system.RunCommand(ctx, "bash", append([]string{autoScript}, args...)...)
 	if err != nil {
-		return "", fmt.Errorf("screenshot upload failed: %s", bestErrorMessage(err, stderr, stdout))
+		return "", fmt.Errorf("screenshot upload failed: %s", system.BestErrorMessage(err, stderr, stdout))
 	}
 
 	links := extractDirectLinks(stdout)
@@ -148,12 +151,12 @@ func randomScreenshotTimestamps(ctx context.Context, inputPath string, count int
 		count = screenshotCount
 	}
 
-	ffprobe, err := resolveBin("FFPROBE_BIN", "ffprobe")
+	ffprobe, err := system.ResolveBin("FFPROBE_BIN", "ffprobe")
 	if err != nil {
 		return nil, err
 	}
 
-	sourcePath, cleanup, err := resolveScreenshotSource(ctx, inputPath)
+	sourcePath, cleanup, err := media.ResolveScreenshotSource(ctx, inputPath)
 	if err != nil {
 		return nil, err
 	}
@@ -173,14 +176,14 @@ func randomScreenshotTimestamps(ctx context.Context, inputPath string, count int
 }
 
 func probeMediaDuration(ctx context.Context, ffprobe, path string) (float64, error) {
-	stdout, stderr, err := runCommand(ctx, ffprobe,
+	stdout, stderr, err := system.RunCommand(ctx, ffprobe,
 		"-v", "error",
 		"-show_entries", "format=duration",
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		path,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("ffprobe failed: %s", bestErrorMessage(err, stderr, stdout))
+		return 0, fmt.Errorf("ffprobe failed: %s", system.BestErrorMessage(err, stderr, stdout))
 	}
 
 	value := strings.TrimSpace(stdout)
