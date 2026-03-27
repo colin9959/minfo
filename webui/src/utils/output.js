@@ -1,14 +1,3 @@
-export function saveBlob(blob, filename) {
-    const url = window.URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    window.URL.revokeObjectURL(url);
-}
-
 export async function copyText(text) {
     if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
         try {

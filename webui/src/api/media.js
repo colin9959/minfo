@@ -21,14 +21,22 @@ export async function requestInfo(path, url, fields = {}) {
     return data;
 }
 
-export async function requestScreenshotZip(path, variant) {
-    const response = await postForm("/api/screenshots", { path, mode: "zip", variant });
-    const contentType = response.headers.get("content-type") || "";
-    if (!response.ok || !contentType.includes("application/zip")) {
-        const data = await safeReadJSON(response);
+export async function prepareScreenshotZipDownload(path, variant) {
+    const response = await postForm("/api/screenshots", { path, mode: "zip", variant, prepare_download: "1" });
+    const data = await safeReadJSON(response);
+    if (!response.ok || !data.ok || typeof data.output !== "string" || data.output.trim() === "") {
         throw new Error(data.error || "截图请求失败。");
     }
-    return response.blob();
+    return new URL(data.output, window.location.origin).toString();
+}
+
+export function startPreparedDownload(url) {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
 }
 
 export async function requestScreenshotLinks(path, variant) {

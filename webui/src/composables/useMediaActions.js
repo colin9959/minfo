@@ -1,6 +1,6 @@
 import { computed, ref, watch } from "vue";
-import { requestInfo, requestScreenshotLinks, requestScreenshotZip } from "../api/media";
-import { buildBBCodeText, buildCopyText, buildLinkText, copyText, extractDirectLinks, mergeOutputLinks, saveBlob } from "../utils/output";
+import { prepareScreenshotZipDownload, requestInfo, requestScreenshotLinks, startPreparedDownload } from "../api/media";
+import { buildBBCodeText, buildCopyText, buildLinkText, copyText, extractDirectLinks, mergeOutputLinks } from "../utils/output";
 
 export function useMediaActions(path, screenshotVariant, hasInput) {
     const outputText = ref("");
@@ -109,9 +109,9 @@ export function useMediaActions(path, screenshotVariant, hasInput) {
         try {
             activateOutputPanel();
             setBusy(true, "正在生成截图...", "download-shots");
-            const blob = await requestScreenshotZip(path.value.trim(), screenshotVariant.value);
-            saveBlob(blob, "screenshots.zip");
-            setOutputText("截图已下载为 screenshots.zip。");
+            const downloadURL = await prepareScreenshotZipDownload(path.value.trim(), screenshotVariant.value);
+            startPreparedDownload(downloadURL);
+            setOutputText("截图已生成。");
         } catch (err) {
             clearOutputState();
             hidePanels();
