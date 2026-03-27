@@ -63,4 +63,53 @@ exec ssh -T \
     -o UserKnownHostsFile=/dev/null \
     -o ControlPath="$CONTROL_SOCKET" \
     "$REMOTE_TARGET" \
-    "mkdir -p '${REMOTE_DEPLOY_DIR_VALUE}' && find '${REMOTE_DEPLOY_DIR_VALUE}' -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} + && tar -xzf '${REMOTE_ARCHIVE_PATH}' -C '${REMOTE_DEPLOY_DIR_VALUE}' && rm -f '${REMOTE_ARCHIVE_PATH}' && cd '${REMOTE_DEPLOY_DIR_VALUE}' && docker compose -f docker-compose.yml up -d --build && docker compose -f docker-compose.yml ps minfo && echo && echo 'remote release url: http://${REMOTE_SSH_HOST_VALUE}:38080' && echo && docker compose -f docker-compose.yml logs --no-color --tail 20 minfo"
+    bash -s -- "$REMOTE_DEPLOY_DIR_VALUE" "$REMOTE_ARCHIVE_PATH" "$REMOTE_SSH_HOST_VALUE" <<'REMOTE_SCRIPT'
+set -euo pipefail
+
+REMOTE_DEPLOY_DIR_VALUE="$1"
+REMOTE_ARCHIVE_PATH="$2"
+REMOTE_SSH_HOST_VALUE="$3"
+
+mkdir -p "$REMOTE_DEPLOY_DIR_VALUE"
+find "$REMOTE_DEPLOY_DIR_VALUE" -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
+tar -xzf "$REMOTE_ARCHIVE_PATH" -C "$REMOTE_DEPLOY_DIR_VALUE"
+rm -f "$REMOTE_ARCHIVE_PATH"
+
+cd "$REMOTE_DEPLOY_DIR_VALUE"
+
+if [[ -f .env ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env
+    set +a
+fi
+
+PROXY_HTTP="${HTTP_PROXY:-${http_proxy:-}}"
+PROXY_HTTPS="${HTTPS_PROXY:-${https_proxy:-}}"
+BUILDER_NAME="minfo-release-builder"
+
+if [[ -n "$PROXY_HTTP" || -n "$PROXY_HTTPS" ]]; then
+    docker buildx rm "$BUILDER_NAME" >/dev/null 2>&1 || true
+
+    buildx_args=(--driver-opt "network=host")
+    if [[ -n "$PROXY_HTTP" ]]; then
+        buildx_args+=(--driver-opt "env.http_proxy=${PROXY_HTTP}")
+        buildx_args+=(--driver-opt "env.HTTP_PROXY=${PROXY_HTTP}")
+    fi
+    if [[ -n "$PROXY_HTTPS" ]]; then
+        buildx_args+=(--driver-opt "env.https_proxy=${PROXY_HTTPS}")
+        buildx_args+=(--driver-opt "env.HTTPS_PROXY=${PROXY_HTTPS}")
+    fi
+
+    docker buildx create --name "$BUILDER_NAME" --use --driver docker-container "${buildx_args[@]}" >/dev/null
+    docker buildx inspect --bootstrap >/dev/null
+    export BUILDX_BUILDER="$BUILDER_NAME"
+fi
+
+docker compose -f docker-compose.yml up -d --build
+docker compose -f docker-compose.yml ps minfo
+echo
+echo "remote release url: http://${REMOTE_SSH_HOST_VALUE}:38080"
+echo
+docker compose -f docker-compose.yml logs --no-color --tail 20 minfo
+REMOTE_SCRIPT

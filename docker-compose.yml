@@ -5,6 +5,11 @@ services:
     build:
       context: .
       target: runtime
+      args:
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        http_proxy: "${http_proxy:-}"
+        https_proxy: "${https_proxy:-}"
     privileged: true
     ports:
       - "${HOST_PORT:-38080}:${PORT:-28080}"

@@ -5,6 +5,11 @@ services:
     build:
       context: .
       target: debug
+      args:
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        http_proxy: "${http_proxy:-}"
+        https_proxy: "${https_proxy:-}"
     privileged: true
     ports:
       - "${DEBUG_HOST_PORT:-48080}:${PORT:-28080}"
