@@ -37,6 +37,22 @@
                         <label class="field-label-muted">字幕处理</label>
                         <ScreenshotSubtitleModePicker v-model="screenshotSubtitleMode" :busy="busy" />
                     </div>
+                    <div class="field">
+                        <label for="screenshot-count" class="field-label-muted">截图数量</label>
+                        <input
+                            id="screenshot-count"
+                            class="config-number-input"
+                            type="number"
+                            inputmode="numeric"
+                            min="1"
+                            max="10"
+                            step="1"
+                            :disabled="busy"
+                            :value="screenshotCount"
+                            @input="handleScreenshotCountInput"
+                            @blur="handleScreenshotCountBlur"
+                        />
+                    </div>
                 </div>
             </div>
 
@@ -100,12 +116,37 @@ import { loadAppState, saveAppState } from "./utils/storage";
 const persistedState = loadAppState();
 const screenshotVariant = ref(persistedState.screenshotVariant);
 const screenshotSubtitleMode = ref(persistedState.screenshotSubtitleMode);
+const screenshotCount = ref(persistedState.screenshotCount);
 const bdinfoMode = ref(persistedState.bdinfoMode);
 const pathBrowser = usePathBrowser({
     initialPath: persistedState.path,
     initialBrowserDir: persistedState.browserDir,
 });
-const mediaActions = useMediaActions(pathBrowser.path, screenshotVariant, screenshotSubtitleMode, pathBrowser.hasInput);
+const mediaActions = useMediaActions(pathBrowser.path, screenshotVariant, screenshotSubtitleMode, screenshotCount, pathBrowser.hasInput);
+
+const clampScreenshotCount = (value) => {
+    const parsed = Number.parseInt(`${value ?? ""}`.trim(), 10);
+    if (!Number.isFinite(parsed)) {
+        return 4;
+    }
+    return Math.min(10, Math.max(1, parsed));
+};
+
+const handleScreenshotCountInput = (event) => {
+    const nextValue = clampScreenshotCount(event?.target?.value);
+    screenshotCount.value = nextValue;
+    if (event?.target) {
+        event.target.value = `${nextValue}`;
+    }
+};
+
+const handleScreenshotCountBlur = (event) => {
+    const nextValue = clampScreenshotCount(event?.target?.value || screenshotCount.value);
+    screenshotCount.value = nextValue;
+    if (event?.target) {
+        event.target.value = `${nextValue}`;
+    }
+};
 
 const {
     path,
@@ -147,13 +188,14 @@ const {
 } = mediaActions;
 
 watch(
-    [path, browserDir, screenshotVariant, screenshotSubtitleMode, bdinfoMode],
-    ([nextPath, nextBrowserDir, nextVariant, nextSubtitleMode, nextBDInfoMode]) => {
+    [path, browserDir, screenshotVariant, screenshotSubtitleMode, screenshotCount, bdinfoMode],
+    ([nextPath, nextBrowserDir, nextVariant, nextSubtitleMode, nextScreenshotCount, nextBDInfoMode]) => {
         saveAppState({
             path: nextPath,
             browserDir: nextBrowserDir,
             screenshotVariant: nextVariant,
             screenshotSubtitleMode: nextSubtitleMode,
+            screenshotCount: nextScreenshotCount,
             bdinfoMode: nextBDInfoMode,
         });
     },

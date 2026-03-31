@@ -179,12 +179,17 @@ label {
 }
 
 input[type="file"],
-input[type="text"] {
+input[type="text"],
+input[type="number"] {
   border-radius: 12px;
   border: 1px solid rgba(33, 50, 60, 0.2);
   padding: 12px 14px;
   font-size: 0.95rem;
   background: rgba(255, 255, 255, 0.9);
+}
+
+.config-number-input {
+  width: 96px;
 }
 
 .path-picker {

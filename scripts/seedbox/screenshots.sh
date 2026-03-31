@@ -66,6 +66,8 @@ ISO_PATH=""
 M2TS_INPUT=""
 START_OFFSET="0.0"
 DURATION="0.0"
+VIDEO_WIDTH=""
+VIDEO_HEIGHT=""
 
 SUB_MODE=""
 SUB_FILE=""
@@ -78,7 +80,9 @@ SUB_IDX=""
 SUB_TEMP_FILE=""
 
 # —— 语言集合
-LANGS_ZH=("zh" "zho" "chi" "zh-cn" "zh_cn" "chs" "cht" "cn" "chinese" "mandarin" "cantonese" "yue" "han")
+LANGS_ZH_HANS=("简体" "简中" "chs" "zh-hans" "zh_hans" "zh-cn" "zh_cn")
+LANGS_ZH_HANT=("繁体" "繁中" "cht" "big5" "zh-hant" "zh_hant" "zh-tw" "zh_tw")
+LANGS_ZH_GENERIC=("中文" "chinese" "zho" "chi" "zh")
 LANGS_EN=("en" "eng" "english")
 
 lower(){ echo "$1" | tr '[:upper:]' '[:lower:]'; }
@@ -90,6 +94,50 @@ has_lang_token(){
   done
   return 1
 }
+classify_sub_lang(){
+  local hint="$1"
+  if has_lang_token "$hint" "${LANGS_ZH_HANS[@]}"; then
+    echo "zh-Hans"
+  elif has_lang_token "$hint" "${LANGS_ZH_HANT[@]}"; then
+    echo "zh-Hant"
+  elif has_lang_token "$hint" "${LANGS_ZH_GENERIC[@]}"; then
+    echo "zh"
+  elif has_lang_token "$hint" "${LANGS_EN[@]}"; then
+    echo "en"
+  else
+    echo ""
+  fi
+}
+subtitle_lang_score(){
+  case "$1" in
+    zh-Hans) echo 400 ;;
+    zh-Hant) echo 300 ;;
+    zh) echo 250 ;;
+    en) echo 200 ;;
+    *) echo 0 ;;
+  esac
+}
+subtitle_disposition_score(){
+  local forced="${1:-0}" is_default="${2:-0}"
+  if [ "$forced" = "0" ] && [ "$is_default" = "1" ]; then
+    echo 40
+  elif [ "$forced" = "0" ] && [ "$is_default" = "0" ]; then
+    echo 30
+  elif [ "$forced" = "1" ] && [ "$is_default" = "1" ]; then
+    echo 20
+  else
+    echo 10
+  fi
+}
+log_subtitle_fallback(){
+  local mode_label="$1"
+  case "${SUB_LANG:-}" in
+    zh-Hant) log "[提示] 未找到简体中文字幕，改用繁体${mode_label}字幕。" ;;
+    zh) log "[提示] 未明确识别简繁体，改用中文${mode_label}字幕。" ;;
+    en) log "[提示] 未找到中文字幕，改用英文${mode_label}字幕。" ;;
+    default) log "[提示] 未找到简体/繁体/英文字幕，改用默认${mode_label}字幕。" ;;
+  esac
+}
 escape_squote(){ echo "${1//\'/\\\'}"; }
 is_iso(){
   case "${1##*.}" in
@@ -99,6 +147,7 @@ is_iso(){
 }
 hms_to_seconds(){ local t="$1" h=0 m=0 s=0; IFS=':' read -r a b c <<<"$t"; if [ -z "${c:-}" ]; then m=$a; s=$b; else h=$a; m=$b; s=$c; fi; echo $((10#$h*3600 + 10#$m*60 + 10#$s)); }
 sec_to_hms(){ local x=${1%.*}; printf "%02d:%02d:%02d" $((x/3600)) $(((x%3600)/60)) $((x%60)); }
+sec_to_filename_stamp(){ local x=${1%.*}; printf "%02dh%02dm%02ds" $((x/3600)) $(((x%3600)/60)) $((x%60)); }
 sec_to_hms_ms(){ awk -v t="$1" 'BEGIN{ if (t < 0) t = 0; h = int(t/3600); m = int((t%3600)/60); s = t - h*3600 - m*60; printf "%02d:%02d:%06.3f", h, m, s }'; }
 fmax(){ awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f",(a>b?a:b)}'; }
 fmin(){ awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f",(a<b?a:b)}'; }
@@ -303,35 +352,28 @@ find_external_sub(){
 
   local cands=()
   for ext in ass srt; do
-    for z in "${LANGS_ZH[@]}"; do cands+=("$dir/${base}.$z.$ext" "$dir/${base}-${z}.$ext" "$dir/${base}_$z.$ext"); done
+    for z in "${LANGS_ZH_HANS[@]}" "${LANGS_ZH_HANT[@]}" "${LANGS_ZH_GENERIC[@]}"; do cands+=("$dir/${base}.$z.$ext" "$dir/${base}-${z}.$ext" "$dir/${base}_$z.$ext"); done
     for e in "${LANGS_EN[@]}"; do cands+=("$dir/${base}.$e.$ext" "$dir/${base}-${e}.$ext" "$dir/${base}_$e.$ext"); done
-    cands+=("$dir/${base}.$ext")
   done
   while IFS= read -r -d '' f; do cands+=("$f"); done < <(find "$dir" -maxdepth 1 -type f \( -iname "*.ass" -o -iname "*.srt" \) -iname "*${base}*" -print0)
 
   declare -A seen
-  local best="" score best_score=-1
+  local best="" best_lang="" score best_score=-1
   for f in "${cands[@]}"; do
     [ -f "$f" ] || continue
     [ -n "${seen[$f]:-}" ] && continue
     seen[$f]=1
-    score=0
     local fn="${f##*/}"
-    has_lang_token "$fn" "${LANGS_ZH[@]}" && score=100
-    has_lang_token "$fn" "${LANGS_EN[@]}" && score=$((score>0?score:50))
-    score=$((score+1))
-    [ $score -gt $best_score ] && { best_score=$score; best="$f"; }
+    local lang_class
+    lang_class="$(classify_sub_lang "$fn")"
+    [ -n "$lang_class" ] || continue
+    score="$(subtitle_lang_score "$lang_class")"
+    [ "$score" -gt "$best_score" ] && { best_score="$score"; best="$f"; best_lang="$lang_class"; }
   done
 
   if [ -n "$best" ]; then
     SUB_MODE="external"; SUB_FILE="$best"
-    if has_lang_token "$best" "${LANGS_ZH[@]}"; then
-      SUB_LANG="zh"
-    elif has_lang_token "$best" "${LANGS_EN[@]}"; then
-      SUB_LANG="en"
-    else
-      SUB_LANG="unknown"
-    fi
+    SUB_LANG="$best_lang"
     SUB_CODEC="text"
     log "[信息] 选择外挂字幕：$SUB_FILE （语言：$SUB_LANG）"
     return 0
@@ -357,56 +399,55 @@ pick_internal_sub(){
     ] | @tsv' 2>/dev/null) || true
   [ -z "$parsed" ] && return 1
 
-  local best_idx="" best_codec="" best_lang_raw="" best_title="" best_forced="" best_default=""
-  local last_idx="" last_codec="" last_lang_raw="" last_title="" last_forced="" last_default=""
+  local best_idx="" best_codec="" best_lang_raw="" best_title="" best_forced="" best_default="" best_lang_class="" best_score=-1
+  local fallback_idx="" fallback_codec="" fallback_lang_raw="" fallback_title="" fallback_forced="" fallback_default="" fallback_score=-1
+  local idx codec lang title forced is_default lang_hint lang_class lang_score disp_score score
+  while IFS=$'\t' read -r idx codec lang title forced is_default; do
+    [ -z "${idx:-}" ] && continue
+    lang_hint="$(printf '%s %s' "$lang" "$title")"
+    lang_class="$(classify_sub_lang "$lang_hint")"
+    disp_score="$(subtitle_disposition_score "$forced" "$is_default")"
 
-  pick_by_langset(){
-    local want_forced="$1" want_default="$2" want_lang="$3" idx codec lang title forced is_default lang_hint
-    while IFS=$'\t' read -r idx codec lang title forced is_default; do
-      [ -z "${idx:-}" ] && continue
-      lang_hint="$(printf '%s %s' "$lang" "$title")"
-      if [[ "$codec" == "hdmv_pgs_subtitle" ]] && has_lang_token "$lang_hint" "chinese" "${LANGS_ZH[@]}"; then
-        best_idx="$idx"; best_codec="$codec"; best_lang_raw="$lang"; best_title="$title"; best_forced="$forced"; best_default="$is_default"; return 0
+    if [ -n "$lang_class" ]; then
+      lang_score="$(subtitle_lang_score "$lang_class")"
+      score=$((lang_score + disp_score))
+      if [ "$score" -gt "$best_score" ]; then
+        best_idx="$idx"
+        best_codec="$codec"
+        best_lang_raw="$lang"
+        best_title="$title"
+        best_forced="$forced"
+        best_default="$is_default"
+        best_lang_class="$lang_class"
+        best_score="$score"
       fi
-      if [ "$want_lang" = "zh" ]; then
-        has_lang_token "$lang_hint" "${LANGS_ZH[@]}" && [ "$forced" = "$want_forced" ] && [ "$is_default" = "$want_default" ] && {
-          best_idx="$idx"; best_codec="$codec"; best_lang_raw="$lang"; best_title="$title"; best_forced="$forced"; best_default="$is_default"; return 0; }
-      else
-        has_lang_token "$lang_hint" "${LANGS_EN[@]}" && [ "$forced" = "$want_forced" ] && [ "$is_default" = "$want_default" ] && {
-          best_idx="$idx"; best_codec="$codec"; best_lang_raw="$lang"; best_title="$title"; best_forced="$forced"; best_default="$is_default"; return 0; }
-      fi
-    done <<< "$parsed"
-    return 1
-  }
+      continue
+    fi
 
-  pick_by_langset "0" "1" "zh" || pick_by_langset "0" "0" "zh" || \
-  pick_by_langset "1" "1" "zh" || pick_by_langset "1" "0" "zh" || {
-    pick_by_langset "0" "1" "en" || pick_by_langset "0" "0" "en" || \
-    pick_by_langset "1" "1" "en" || pick_by_langset "1" "0" "en" || true
-  }
+    if [ "$is_default" = "1" ] && [ "$disp_score" -gt "$fallback_score" ]; then
+      fallback_idx="$idx"
+      fallback_codec="$codec"
+      fallback_lang_raw="$lang"
+      fallback_title="$title"
+      fallback_forced="$forced"
+      fallback_default="$is_default"
+      fallback_score="$disp_score"
+    fi
+  done <<< "$parsed"
 
-  if [ -z "$best_idx" ]; then
-    while IFS=$'\t' read -r idx codec lang title forced is_default; do
-      last_idx="$idx"
-      last_codec="$codec"
-      last_lang_raw="$lang"
-      last_title="$title"
-      last_forced="$forced"
-      last_default="$is_default"
-    done <<< "$parsed"
-    best_idx="$last_idx"
-    best_codec="$last_codec"
-    best_lang_raw="$last_lang_raw"
-    best_title="$last_title"
-    best_forced="$last_forced"
-    best_default="$last_default"
+  if [ -z "$best_idx" ] && [ -n "$fallback_idx" ]; then
+    best_idx="$fallback_idx"
+    best_codec="$fallback_codec"
+    best_lang_raw="$fallback_lang_raw"
+    best_title="$fallback_title"
+    best_forced="$fallback_forced"
+    best_default="$fallback_default"
+    best_lang_class="default"
   fi
 
   [ -n "$best_idx" ] || return 1
 
-  if has_lang_token "$best_lang_raw $best_title" "${LANGS_ZH[@]}"; then SUB_LANG="zh"
-  elif has_lang_token "$best_lang_raw $best_title" "${LANGS_EN[@]}"; then SUB_LANG="en"
-  else SUB_LANG="unknown"; fi
+  SUB_LANG="$best_lang_class"
 
   SUB_MODE="internal"; SUB_SI="$best_idx"; SUB_CODEC="$best_codec"; SUB_TITLE="$best_title"
 
@@ -431,11 +472,11 @@ choose_subtitle(){
     return 0
   fi
   if find_external_sub "$v"; then
-    [ "$SUB_LANG" = "en" ] && log "[提示] 未找到中文字幕，改用英文外挂字幕。"
+    log_subtitle_fallback "外挂"
     return 0
   fi
   if pick_internal_sub "$v"; then
-    [ "$SUB_LANG" = "en" ] && log "[提示] 未找到中文字幕，改用英文内挂字幕。"
+    log_subtitle_fallback "内挂"
     return 0
   fi
   log "[提示] 未找到可用字幕，将仅截图视频画面。"
@@ -445,6 +486,11 @@ choose_subtitle(){
 extract_internal_text_subtitle(){
   [ "$SUB_MODE" = "internal" ] || return 0
   is_bitmap_sub && return 0
+
+  if is_ass_text_sub; then
+    log "[信息] 内挂 ASS/SSA 字幕将直接使用原始字幕流，保留原样式与字号。"
+    return 0
+  fi
 
   local tmp_sub
   tmp_sub="$(mktemp -t minfo-sub.XXXXXX.srt)" || return 1
@@ -470,11 +516,23 @@ is_bitmap_sub(){
     *) return 1 ;;
   esac
 }
+
+is_ass_text_sub(){
+  case "$(lower "${SUB_CODEC:-}")" in
+    ass|ssa) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 build_text_sub_filter(){
+  local original_size_opt=""
+  if [ -n "${VIDEO_WIDTH:-}" ] && [ -n "${VIDEO_HEIGHT:-}" ]; then
+    original_size_opt=":original_size=${VIDEO_WIDTH}x${VIDEO_HEIGHT}"
+  fi
   if [ "$SUB_MODE" = "external" ]; then
-    echo "subtitles='$(escape_squote "$SUB_FILE")'"
+    echo "subtitles='$(escape_squote "$SUB_FILE")'${original_size_opt}"
   elif [ "$SUB_MODE" = "internal" ]; then
-    echo "subtitles='$(escape_squote "$video")':si=${SUB_REL}"
+    echo "subtitles='$(escape_squote "$video")'${original_size_opt}:si=${SUB_REL}"
   else
     echo ""
   fi
@@ -484,11 +542,7 @@ build_text_sub_vf_chain(){
   local pts_shift="$1" subf
   subf="$(build_text_sub_filter)"
   [ -n "$subf" ] || { echo ""; return 0; }
-  if [ "$SUB_MODE" = "external" ]; then
-    echo "setpts=PTS+${pts_shift}/TB,${subf}"
-  else
-    echo "$subf"
-  fi
+  echo "setpts=PTS+${pts_shift}/TB,${subf}"
 }
 
 detect_start_offset(){
@@ -502,6 +556,18 @@ detect_duration(){
   d=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$video" 2>/dev/null | head -n1)
   [[ "$d" =~ ^[0-9] ]] || d=$(ffprobe -v error -select_streams v:0 -show_entries stream=duration -of default=noprint_wrappers=1:nokey=1 "$video" 2>/dev/null | head -n1)
   DURATION="${d:-0.0}"
+}
+
+detect_video_dimensions(){
+  local dims
+  dims=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0:s=x "$video" 2>/dev/null | head -n1)
+  if [[ "$dims" =~ ^[0-9]+x[0-9]+$ ]]; then
+    VIDEO_WIDTH="${dims%x*}"
+    VIDEO_HEIGHT="${dims#*x}"
+  else
+    VIDEO_WIDTH=""
+    VIDEO_HEIGHT=""
+  fi
 }
 
 # —— PGS 事件（packet-size 过滤）
@@ -535,25 +601,25 @@ packets_to_index_rel(){
 probe_sub_events_internal_window(){
   local start_abs="$1" dur="$2"
   ffprobe -v error -select_streams s:"$SUB_REL" -read_intervals "${start_abs}%+${dur}" \
-    -show_frames -show_entries frame=pkt_pts_time,pkt_duration_time -of default=noprint_wrappers=1 "$video" 2>/dev/null
+    -show_packets -show_entries packet=pts_time,duration_time -of default=noprint_wrappers=1 "$video" 2>/dev/null
 }
 probe_sub_events_external_window(){
   local start="$1" dur="$2"
   ffprobe -v error -read_intervals "${start}%+${dur}" \
-    -show_frames -show_entries frame=pkt_pts_time,pkt_duration_time -of default=noprint_wrappers=1 "$SUB_FILE" 2>/dev/null
+    -show_packets -show_entries packet=pts_time,duration_time -of default=noprint_wrappers=1 "$SUB_FILE" 2>/dev/null
 }
 dump_all_sub_events_internal(){
   ffprobe -v error -select_streams s:"$SUB_REL" \
-    -show_frames -show_entries frame=pkt_pts_time,pkt_duration_time -of default=noprint_wrappers=1 "$video" 2>/dev/null
+    -show_packets -show_entries packet=pts_time,duration_time -of default=noprint_wrappers=1 "$video" 2>/dev/null
 }
 dump_all_sub_events_external(){
-  ffprobe -v error -show_frames -show_entries frame=pkt_pts_time,pkt_duration_time -of default=noprint_wrappers=1 "$SUB_FILE" 2>/dev/null
+  ffprobe -v error -show_packets -show_entries packet=pts_time,duration_time -of default=noprint_wrappers=1 "$SUB_FILE" 2>/dev/null
 }
 frames_to_index_rel(){
   local mode="$1"
   awk -v defdur="$DEFAULT_SUB_DUR" -v off="$START_OFFSET" -v mode="$mode" '
-    /^pkt_pts_time=/ {pts=substr($0,index($0,"=")+1)}
-    /^pkt_duration_time=/ {
+    /^pkt_pts_time=/ || /^pts_time=/ {pts=substr($0,index($0,"=")+1)}
+    /^pkt_duration_time=/ || /^duration_time=/ {
       dur=substr($0,index($0,"=")+1)
       if (dur=="" || dur=="N/A") dur=defdur
       if (pts!="") {
@@ -785,16 +851,19 @@ do_screenshot(){
       -filter_complex "[0:v:0][0:s:${SUB_REL}]overlay=(W-w)/2:(H-h-10)" \
       -frames:v 1 -c:v png -compression_level 9 -pred mixed -y "$path"
   else
-    local subvf; subvf="$(build_text_sub_vf_chain "$t_aligned")"
-    if [ -n "$subvf" ]; then
+    local frame_select="setpts=PTS-STARTPTS,select='gte(t,${fine_sec})'"
+    local subf; subf="$(build_text_sub_filter)"
+    if [ -n "$subf" ]; then
+      local vf_chain="${frame_select},setpts=PTS-STARTPTS+${t_aligned}/TB,${subf}"
       # 文本字幕：只用 subtitles，不要 overlay
       ffmpeg -v error -fflags +genpts -ss "$coarse_hms" -probesize "$PROBESIZE" -analyzeduration "$ANALYZE" \
-        -i "$video" -ss "$fine_sec" -map 0:v:0 -y -frames:v 1 -vf "$subvf" \
+        -i "$video" -map 0:v:0 -y -frames:v 1 -vf "$vf_chain" \
         -c:v png -compression_level 9 -pred mixed "$path"
     else
+      local vf_chain="$frame_select"
       # 无字幕：不加任何滤镜
       ffmpeg -v error -fflags +genpts -ss "$coarse_hms" -probesize "$PROBESIZE" -analyzeduration "$ANALYZE" \
-        -i "$video" -ss "$fine_sec" -map 0:v:0 -y -frames:v 1 \
+        -i "$video" -map 0:v:0 -y -frames:v 1 -vf "$vf_chain" \
         -c:v png -compression_level 9 -pred mixed "$path"
     fi
   fi
@@ -823,14 +892,15 @@ do_screenshot_reencode(){
       -filter_complex "[0:v:0][0:s:${SUB_REL}]overlay=(W-w)/2:(H-h-10),${color_chain}" \
       -frames:v 1 -y -c:v png -compression_level 9 -pred mixed "$path"
   else
-    local subvf; subvf="$(build_text_sub_vf_chain "$t_aligned")"
-    local vf_chain="$color_chain"
+    local frame_select="setpts=PTS-STARTPTS,select='gte(t,${fine_sec})'"
+    local subf; subf="$(build_text_sub_filter)"
+    local vf_chain="${frame_select},${color_chain}"
     # 如有文本字幕，前置 subtitles；无字幕就只做色彩转换
-    if [ -n "$subvf" ]; then
-      vf_chain="$subvf,$vf_chain"
+    if [ -n "$subf" ]; then
+      vf_chain="${frame_select},setpts=PTS-STARTPTS+${t_aligned}/TB,${subf},${color_chain}"
     fi
     ffmpeg -v error -fflags +genpts -ss "$coarse_hms" -probesize "$PROBESIZE" -analyzeduration "$ANALYZE" \
-      -i "$video" -ss "$fine_sec" -map 0:v:0 -frames:v 1 -y -vf "$vf_chain" \
+      -i "$video" -map 0:v:0 -frames:v 1 -y -vf "$vf_chain" \
       -c:v png -compression_level 9 -pred mixed "$path"
   fi
 }
@@ -852,6 +922,7 @@ choose_subtitle "$video" || true
 extract_internal_text_subtitle || true
 detect_start_offset
 detect_duration
+detect_video_dimensions
 DURATION_HMS="$(sec_to_hms ${DURATION%.*})"
 
 # 检测色彩空间信息
@@ -907,18 +978,19 @@ for T_req in "${TARGET_SECONDS[@]}"; do
   [ -z "$T_align" ] && T_align="$T_req"
   [ "${T_align:0:1}" = "." ] && T_align="0${T_align}"
 
+  T_shot="$T_align"
+  timepart="$(sec_to_filename_stamp "$T_shot")"
   if [ "$#" -gt 0 ]; then
-    minpart=$(( ${T_req%.*} / 60 ))
-    filename="${minpart}min.png"
+    filename="${timepart}.png"
   else
-    filename="auto${idx}.png"
+    filename="auto${idx}_${timepart}.png"
   fi
   filepath="$outdir/$filename"
 
-  log "[信息] 截图: $(sec_to_hms_ms "$T_req") → 实际 $(sec_to_hms_ms "$T_align") -> $filename"
+  log "[信息] 截图: 请求 $(sec_to_hms_ms "$T_req") → 对齐 $(sec_to_hms_ms "$T_align") → 输出 $(sec_to_hms_ms "$T_shot") -> $filename"
 
   # 捕获首次截图的真实错误信息
-  first_shot_output=$(do_screenshot "$T_align" "$filepath" 2>&1)
+  first_shot_output=$(do_screenshot "$T_shot" "$filepath" 2>&1)
   ret=$?
   if [ $ret -ne 0 ]; then
     # 记录真实的FFmpeg错误信息
@@ -933,7 +1005,7 @@ for T_req in "${TARGET_SECONDS[@]}"; do
   if (( $(echo "$size_mb > 10" | bc -l) )); then
     log "[提示] $filename 大小 ${size_mb}MB，重拍并映射到 SDR..."
     # 捕获FFmpeg的真实输出和错误信息
-    ffmpeg_output=$(do_screenshot_reencode "$T_align" "$filepath" 2>&1)
+    ffmpeg_output=$(do_screenshot_reencode "$T_shot" "$filepath" 2>&1)
     ret=$?
     
     # 基于真实结果判断，而不是猜想

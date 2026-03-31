@@ -21,8 +21,8 @@ export async function requestInfo(path, url, fields = {}) {
     return data;
 }
 
-export async function prepareScreenshotZipDownload(path, variant, subtitleMode) {
-    const response = await postForm("/api/screenshots", { path, mode: "zip", variant, subtitle_mode: subtitleMode, prepare_download: "1" });
+export async function prepareScreenshotZipDownload(path, variant, subtitleMode, count) {
+    const response = await postForm("/api/screenshots", { path, mode: "zip", variant, subtitle_mode: subtitleMode, count, prepare_download: "1" });
     const data = await safeReadJSON(response);
     if (!response.ok || !data.ok || typeof data.output !== "string" || data.output.trim() === "") {
         throw buildResponseError(data.error || "截图请求失败。", data);
@@ -42,8 +42,8 @@ export function startPreparedDownload(url) {
     anchor.remove();
 }
 
-export async function requestScreenshotLinks(path, variant, subtitleMode) {
-    const response = await postForm("/api/screenshots", { path, mode: "links", variant, subtitle_mode: subtitleMode });
+export async function requestScreenshotLinks(path, variant, subtitleMode, count) {
+    const response = await postForm("/api/screenshots", { path, mode: "links", variant, subtitle_mode: subtitleMode, count });
     const data = await safeReadJSON(response);
     if (!response.ok || !data.ok) {
         throw buildResponseError(data.error || "图床链接请求失败。", data);

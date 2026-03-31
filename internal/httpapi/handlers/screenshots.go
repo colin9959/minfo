@@ -47,6 +47,7 @@ func handleScreenshotsPost(w http.ResponseWriter, r *http.Request) {
 	mode := screenshot.NormalizeMode(r.FormValue("mode"))
 	variant := screenshot.NormalizeVariant(r.FormValue("variant"))
 	subtitleMode := screenshot.NormalizeSubtitleMode(r.FormValue("subtitle_mode"))
+	count := screenshot.NormalizeCount(r.FormValue("count"))
 
 	ctx, cancel := context.WithTimeout(r.Context(), config.RequestTimeout)
 	defer cancel()
@@ -59,7 +60,7 @@ func handleScreenshotsPost(w http.ResponseWriter, r *http.Request) {
 	defer os.RemoveAll(tempDir)
 
 	if mode == screenshot.ModeLinks {
-		result, err := screenshot.RunUploadWithLogs(ctx, path, tempDir, variant, subtitleMode)
+		result, err := screenshot.RunUploadWithLogs(ctx, path, tempDir, variant, subtitleMode, count)
 		if err != nil {
 			transport.WriteJSON(w, http.StatusInternalServerError, transport.InfoResponse{OK: false, Error: err.Error(), Logs: result.Logs})
 			return
@@ -69,7 +70,7 @@ func handleScreenshotsPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if shouldPrepareDownload(r) {
-		downloadURL, logs, err := prepareScreenshotZipDownload(ctx, path, tempDir, variant, subtitleMode)
+		downloadURL, logs, err := prepareScreenshotZipDownload(ctx, path, tempDir, variant, subtitleMode, count)
 		if err != nil {
 			transport.WriteJSON(w, http.StatusInternalServerError, transport.InfoResponse{OK: false, Error: err.Error(), Logs: logs})
 			return
@@ -78,7 +79,7 @@ func handleScreenshotsPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := writeScreenshotZipResponse(ctx, w, path, tempDir, variant, subtitleMode); err != nil {
+	if err := writeScreenshotZipResponse(ctx, w, path, tempDir, variant, subtitleMode, count); err != nil {
 		transport.WriteError(w, http.StatusInternalServerError, err.Error())
 	}
 }
@@ -97,6 +98,7 @@ func handleScreenshotZipDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	variant := screenshot.NormalizeVariant(r.URL.Query().Get("variant"))
 	subtitleMode := screenshot.NormalizeSubtitleMode(r.URL.Query().Get("subtitle_mode"))
+	count := screenshot.NormalizeCount(r.URL.Query().Get("count"))
 
 	ctx, cancel := context.WithTimeout(r.Context(), config.RequestTimeout)
 	defer cancel()
@@ -108,7 +110,7 @@ func handleScreenshotZipDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	if err := writeScreenshotZipResponse(ctx, w, path, tempDir, variant, subtitleMode); err != nil {
+	if err := writeScreenshotZipResponse(ctx, w, path, tempDir, variant, subtitleMode, count); err != nil {
 		transport.WriteError(w, http.StatusInternalServerError, err.Error())
 	}
 }
@@ -117,8 +119,8 @@ func shouldPrepareDownload(r *http.Request) bool {
 	return strings.TrimSpace(r.FormValue("prepare_download")) == "1"
 }
 
-func prepareScreenshotZipDownload(ctx context.Context, path, tempDir, variant, subtitleMode string) (string, string, error) {
-	zipBytes, logs, err := generateScreenshotZip(ctx, path, tempDir, variant, subtitleMode)
+func prepareScreenshotZipDownload(ctx context.Context, path, tempDir, variant, subtitleMode string, count int) (string, string, error) {
+	zipBytes, logs, err := generateScreenshotZip(ctx, path, tempDir, variant, subtitleMode, count)
 	if err != nil {
 		return "", logs, err
 	}
@@ -130,8 +132,8 @@ func prepareScreenshotZipDownload(ctx context.Context, path, tempDir, variant, s
 	return "/api/screenshots?token=" + token, logs, nil
 }
 
-func writeScreenshotZipResponse(ctx context.Context, w http.ResponseWriter, path, tempDir, variant, subtitleMode string) error {
-	zipBytes, _, err := generateScreenshotZip(ctx, path, tempDir, variant, subtitleMode)
+func writeScreenshotZipResponse(ctx context.Context, w http.ResponseWriter, path, tempDir, variant, subtitleMode string, count int) error {
+	zipBytes, _, err := generateScreenshotZip(ctx, path, tempDir, variant, subtitleMode, count)
 	if err != nil {
 		return err
 	}
@@ -145,8 +147,8 @@ func writeScreenshotZipResponse(ctx context.Context, w http.ResponseWriter, path
 	return nil
 }
 
-func generateScreenshotZip(ctx context.Context, path, tempDir, variant, subtitleMode string) ([]byte, string, error) {
-	result, err := screenshot.RunScriptWithLogs(ctx, path, tempDir, variant, subtitleMode)
+func generateScreenshotZip(ctx context.Context, path, tempDir, variant, subtitleMode string, count int) ([]byte, string, error) {
+	result, err := screenshot.RunScriptWithLogs(ctx, path, tempDir, variant, subtitleMode, count)
 	if err != nil {
 		return nil, result.Logs, err
 	}

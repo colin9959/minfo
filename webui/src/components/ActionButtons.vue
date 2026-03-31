@@ -10,7 +10,7 @@
         </button>
         <button class="action-btn" :class="{ loading: activeAction === 'download-shots' }" :disabled="busy || !hasInput" @click="$emit('download-shots')">
             <span v-if="activeAction === 'download-shots'" class="action-btn-spinner"></span>
-            <span>{{ activeAction === "download-shots" ? "下载中..." : "下载 4 张截图" }}</span>
+            <span>{{ activeAction === "download-shots" ? "下载中..." : "下载截图" }}</span>
         </button>
         <button class="action-btn" :class="{ loading: activeAction === 'output-links' }" :disabled="busy || !hasInput" @click="$emit('output-links')">
             <span v-if="activeAction === 'output-links'" class="action-btn-spinner"></span>

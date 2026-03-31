@@ -2,7 +2,7 @@ import { computed, ref, watch } from "vue";
 import { prepareScreenshotZipDownload, requestInfo, requestScreenshotLinks, startPreparedDownload } from "../api/media";
 import { buildBBCodeText, buildCopyText, buildLinkText, copyText, extractDirectLinks, mergeOutputLinks } from "../utils/output";
 
-export function useMediaActions(path, screenshotVariant, screenshotSubtitleMode, hasInput) {
+export function useMediaActions(path, screenshotVariant, screenshotSubtitleMode, screenshotCount, hasInput) {
     const outputText = ref("");
     const linkItems = ref([]);
     const busy = ref(false);
@@ -123,7 +123,7 @@ export function useMediaActions(path, screenshotVariant, screenshotSubtitleMode,
         try {
             activateOutputPanel();
             setBusy(true, "正在生成截图...", "download-shots");
-            const { downloadURL, logs } = await prepareScreenshotZipDownload(path.value.trim(), screenshotVariant.value, screenshotSubtitleMode.value);
+            const { downloadURL, logs } = await prepareScreenshotZipDownload(path.value.trim(), screenshotVariant.value, screenshotSubtitleMode.value, screenshotCount.value);
             logScreenshotLogs("download", logs);
             startPreparedDownload(downloadURL);
             setOutputText("截图已生成。");
@@ -146,7 +146,7 @@ export function useMediaActions(path, screenshotVariant, screenshotSubtitleMode,
             activateImageLinksPanel(true);
             setBusy(true, "", "output-links");
             setLinkStatusText("正在生成截图并上传...");
-            const data = await requestScreenshotLinks(path.value.trim(), screenshotVariant.value, screenshotSubtitleMode.value);
+            const data = await requestScreenshotLinks(path.value.trim(), screenshotVariant.value, screenshotSubtitleMode.value, screenshotCount.value);
             logScreenshotLogs("upload", data.logs);
             const output = data.output || "";
             const links = extractDirectLinks(output);
@@ -186,7 +186,7 @@ export function useMediaActions(path, screenshotVariant, screenshotSubtitleMode,
             activateImageLinksPanel(false);
             setBusy(true);
             setLinkStatusText("正在生成截图并上传...");
-            const data = await requestScreenshotLinks(path.value.trim(), screenshotVariant.value, screenshotSubtitleMode.value);
+            const data = await requestScreenshotLinks(path.value.trim(), screenshotVariant.value, screenshotSubtitleMode.value, screenshotCount.value);
             logScreenshotLogs("upload", data.logs);
             const output = data.output || "";
             const links = extractDirectLinks(output);

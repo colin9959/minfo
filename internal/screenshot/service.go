@@ -18,7 +18,12 @@ import (
 )
 
 const screenshotScriptDir = "/usr/local/share/minfo/scripts"
-const screenshotCount = 4
+
+const (
+	defaultScreenshotCount = 4
+	minScreenshotCount     = 1
+	maxScreenshotCount     = 10
+)
 
 const (
 	ModeZip   = "zip"
@@ -68,6 +73,26 @@ func NormalizeSubtitleMode(raw string) string {
 	}
 }
 
+func NormalizeCount(raw string) int {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return defaultScreenshotCount
+	}
+
+	count, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultScreenshotCount
+	}
+	switch {
+	case count < minScreenshotCount:
+		return minScreenshotCount
+	case count > maxScreenshotCount:
+		return maxScreenshotCount
+	default:
+		return count
+	}
+}
+
 func subtitleModeArgs(mode string) []string {
 	if mode == SubtitleModeOff {
 		return []string{"-nosub"}
@@ -105,15 +130,15 @@ func resolveScript(envKey, fallbackName string) (string, error) {
 	return "", fmt.Errorf("%s not found in %s; rebuild the image or set %s to override", fallbackName, screenshotScriptDir, envKey)
 }
 
-func RunScript(ctx context.Context, inputPath, outputDir, variant, subtitleMode string) ([]string, error) {
-	result, err := RunScriptWithLogs(ctx, inputPath, outputDir, variant, subtitleMode)
+func RunScript(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int) ([]string, error) {
+	result, err := RunScriptWithLogs(ctx, inputPath, outputDir, variant, subtitleMode, count)
 	if err != nil {
 		return nil, err
 	}
 	return result.Files, nil
 }
 
-func RunScriptWithLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode string) (ScriptResult, error) {
+func RunScriptWithLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int) (ScriptResult, error) {
 	scriptPath, err := resolveScript("SCREENSHOT_SCRIPT", screenshotScriptName(variant))
 	if err != nil {
 		return ScriptResult{}, err
@@ -125,7 +150,7 @@ func RunScriptWithLogs(ctx context.Context, inputPath, outputDir, variant, subti
 	}
 	defer cleanup()
 
-	timestamps, err := randomScreenshotTimestampsForSource(ctx, sourcePath, screenshotCount)
+	timestamps, err := randomScreenshotTimestampsForSource(ctx, sourcePath, count)
 	if err != nil {
 		return ScriptResult{}, err
 	}
@@ -146,21 +171,21 @@ func RunScriptWithLogs(ctx context.Context, inputPath, outputDir, variant, subti
 	return ScriptResult{Files: files, Logs: logs}, nil
 }
 
-func RunUpload(ctx context.Context, inputPath, outputDir, variant, subtitleMode string) (string, error) {
-	result, err := RunUploadWithLogs(ctx, inputPath, outputDir, variant, subtitleMode)
+func RunUpload(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int) (string, error) {
+	result, err := RunUploadWithLogs(ctx, inputPath, outputDir, variant, subtitleMode, count)
 	if err != nil {
 		return "", err
 	}
 	return result.Output, nil
 }
 
-func RunUploadWithLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode string) (UploadResult, error) {
+func RunUploadWithLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int) (UploadResult, error) {
 	uploadScript, err := resolveScript("SCREENSHOT_UPLOAD_SCRIPT", "PixhostUpload.sh")
 	if err != nil {
 		return UploadResult{}, err
 	}
 
-	screenshotResult, err := RunScriptWithLogs(ctx, inputPath, outputDir, variant, subtitleMode)
+	screenshotResult, err := RunScriptWithLogs(ctx, inputPath, outputDir, variant, subtitleMode, count)
 	if err != nil {
 		return UploadResult{Logs: screenshotResult.Logs}, err
 	}
@@ -187,9 +212,7 @@ func RunUploadWithLogs(ctx context.Context, inputPath, outputDir, variant, subti
 }
 
 func randomScreenshotTimestamps(ctx context.Context, inputPath string, count int) ([]string, error) {
-	if count <= 0 {
-		count = screenshotCount
-	}
+	count = normalizeCountValue(count)
 
 	sourcePath, cleanup, err := media.ResolveScreenshotSource(ctx, inputPath)
 	if err != nil {
@@ -201,9 +224,7 @@ func randomScreenshotTimestamps(ctx context.Context, inputPath string, count int
 }
 
 func randomScreenshotTimestampsForSource(ctx context.Context, sourcePath string, count int) ([]string, error) {
-	if count <= 0 {
-		count = screenshotCount
-	}
+	count = normalizeCountValue(count)
 
 	ffprobe, err := system.ResolveBin("FFPROBE_BIN", "ffprobe")
 	if err != nil {
@@ -290,9 +311,7 @@ func parseDurationOutput(output string) (float64, error) {
 }
 
 func buildRandomTimestampSeconds(duration float64, count int) []int {
-	if count <= 0 {
-		count = screenshotCount
-	}
+	count = normalizeCountValue(count)
 
 	start := 0.0
 	end := duration
@@ -350,6 +369,19 @@ func buildRandomTimestampSeconds(duration float64, count int) []int {
 
 	sort.Ints(values)
 	return values
+}
+
+func normalizeCountValue(count int) int {
+	switch {
+	case count == 0:
+		return defaultScreenshotCount
+	case count < minScreenshotCount:
+		return minScreenshotCount
+	case count > maxScreenshotCount:
+		return maxScreenshotCount
+	default:
+		return count
+	}
 }
 
 func formatScriptTimestamp(totalSeconds int) string {

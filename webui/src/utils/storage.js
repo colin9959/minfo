@@ -4,6 +4,7 @@ const DEFAULT_STATE = {
     browserDir: "",
     screenshotVariant: "png",
     screenshotSubtitleMode: "auto",
+    screenshotCount: 4,
     bdinfoMode: "code",
 };
 
@@ -42,6 +43,7 @@ function normalizeState(value) {
         browserDir: typeof source.browserDir === "string" ? source.browserDir : DEFAULT_STATE.browserDir,
         screenshotVariant: normalizeVariant(source.screenshotVariant),
         screenshotSubtitleMode: normalizeSubtitleMode(source.screenshotSubtitleMode),
+        screenshotCount: normalizeScreenshotCount(source.screenshotCount),
         bdinfoMode: normalizeBDInfoMode(source.bdinfoMode),
     };
 }
@@ -56,6 +58,14 @@ function normalizeSubtitleMode(value) {
 
 function normalizeBDInfoMode(value) {
     return value === "full" ? "full" : DEFAULT_STATE.bdinfoMode;
+}
+
+function normalizeScreenshotCount(value) {
+    const parsed = Number.parseInt(`${value ?? ""}`.trim(), 10);
+    if (!Number.isFinite(parsed)) {
+        return DEFAULT_STATE.screenshotCount;
+    }
+    return Math.min(10, Math.max(1, parsed));
 }
 
 function isStorageAvailable() {
