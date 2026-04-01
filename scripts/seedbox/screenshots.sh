@@ -59,6 +59,7 @@ SUB_SNAP_EPS=0.50            # 边缘缓冲
 DEFAULT_SUB_DUR=4.00
 PGS_MIN_PKT=1500             # 视为有效 PGS 包的最小 size
 AUTO_PERC=("0.20" "0.40" "0.60" "0.80")
+PLAYLIST_SCAN_MAX=6
 
 MOUNTED=0
 MOUNT_DIR=""
@@ -78,6 +79,9 @@ SUB_CODEC=""
 SUB_TITLE=""
 SUB_IDX=""
 SUB_TEMP_FILE=""
+BLURAY_ROOT=""
+BLURAY_PLAYLIST=""
+BLURAY_CLIP=""
 
 # —— 语言集合
 LANGS_ZH_HANS=("简体" "简中" "chs" "zh-hans" "zh_hans" "zh-cn" "zh_cn")
@@ -108,6 +112,13 @@ classify_sub_lang(){
     echo ""
   fi
 }
+display_probe_value(){
+  local value="${1:-}"
+  case "$(lower "$value")" in
+    ""|unknown|und|undefined|null|n/a|na) echo "无" ;;
+    *) echo "$value" ;;
+  esac
+}
 subtitle_lang_score(){
   case "$1" in
     zh-Hans) echo 400 ;;
@@ -133,8 +144,9 @@ log_subtitle_fallback(){
   local mode_label="$1"
   case "${SUB_LANG:-}" in
     zh-Hant) log "[提示] 未找到简体中文字幕，改用繁体${mode_label}字幕。" ;;
-    zh) log "[提示] 未明确识别简繁体，改用中文${mode_label}字幕。" ;;
+    zh) log "[提示] 检测到中文字幕，但未明确识别简繁体，使用中文${mode_label}字幕。" ;;
     en) log "[提示] 未找到中文字幕，改用英文${mode_label}字幕。" ;;
+    other) log "[提示] 未找到简体/繁体/英文字幕，改用其他${mode_label}字幕。" ;;
     default) log "[提示] 未找到简体/繁体/英文字幕，改用默认${mode_label}字幕。" ;;
   esac
 }
@@ -155,6 +167,323 @@ fadd(){ awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f",a+b}'; }
 fsub(){ awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f",a-b}'; }
 clamp_0_dur(){ awk -v t="$1" -v mx="$DURATION" 'BEGIN{if(t<0)t=0; if(t>mx)t=mx; printf "%.3f",t}'; }
 float_diff_gt(){ awk -v a="$1" -v b="$2" -v eps="${3:-0.0005}" 'BEGIN{d=a-b; if(d<0)d=-d; exit !(d>eps)}'; }
+
+find_bluray_root_from_video(){
+  local vpath="$1" current
+  current="$(cd "$(dirname "$vpath")" && pwd)"
+  while [ "$current" != "/" ]; do
+    if [ -d "$current/BDMV/STREAM" ]; then
+      echo "$current"
+      return 0
+    fi
+    if [ "$(basename "$current")" = "BDMV" ] && [ -d "$current/STREAM" ]; then
+      dirname "$current"
+      return 0
+    fi
+    current="$(dirname "$current")"
+  done
+  return 1
+}
+
+extract_mpls_clip_ids(){
+  local mpls="$1"
+  grep -aoE '[0-9]{5}M2TS' "$mpls" 2>/dev/null | \
+    sed 's/M2TS$//' | awk '!seen[$0]++'
+}
+
+collect_bluray_playlist_scores(){
+  local root="$1" clip="$2" playlist_dir="" stream_dir=""
+  local mpls mpls_size contains total count clip_id clip_file clip_size base
+
+  [ -d "$root/BDMV/PLAYLIST" ] && playlist_dir="$root/BDMV/PLAYLIST"
+  [ -d "$root/BDMV/STREAM" ] && stream_dir="$root/BDMV/STREAM"
+  [ -n "$playlist_dir" ] || return 1
+  [ -n "$stream_dir" ] || return 1
+
+  while IFS= read -r -d '' mpls; do
+    contains=0
+    total=0
+    count=0
+    while IFS= read -r clip_id; do
+      [ -n "$clip_id" ] || continue
+      count=$((count+1))
+      [ "$clip_id" = "$clip" ] && contains=1
+      clip_file="$stream_dir/$clip_id.m2ts"
+      clip_size=$(stat -c%s "$clip_file" 2>/dev/null || echo 0)
+      [[ "$clip_size" =~ ^[0-9]+$ ]] || clip_size=0
+      total=$((total + clip_size))
+    done < <(extract_mpls_clip_ids "$mpls")
+
+    [ "$count" -gt 0 ] || continue
+    mpls_size=$(stat -c%s "$mpls" 2>/dev/null || echo 0)
+    [[ "$mpls_size" =~ ^[0-9]+$ ]] || mpls_size=0
+    base="$(basename "$mpls")"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$contains" "$total" "$count" "$mpls_size" "${base%.*}"
+  done < <(find "$playlist_dir" -maxdepth 1 -type f -iname '*.mpls' -print0 2>/dev/null)
+}
+
+list_bluray_playlists_ranked(){
+  local root="$1" clip="$2"
+  collect_bluray_playlist_scores "$root" "$clip" | \
+    sort -t $'\t' -k1,1nr -k2,2nr -k3,3nr -k4,4nr | cut -f5
+}
+
+find_bluray_playlist_fast(){
+  local root="$1" clip="$2"
+  local playlist=""
+  playlist="$(list_bluray_playlists_ranked "$root" "$clip" | head -n1)"
+  [ -n "$playlist" ] || return 1
+  echo "$playlist"
+}
+
+streams_have_classified_lang(){
+  local lines="$1" lang_hint
+  while IFS=$'\x1f' read -r _ _ _ lang title _ _ _; do
+    [ -n "${lang:-}" ] || [ -n "${title:-}" ] || continue
+    lang_hint="$(printf '%s %s' "$lang" "$title")"
+    [ -n "$(classify_sub_lang "$lang_hint")" ] && return 0
+  done <<< "$lines"
+  return 1
+}
+
+helper_streams_have_classified_lang(){
+  local lines="$1" lang_hint
+  while IFS=$'\x1f' read -r _ lang _ _ _ _; do
+    [ -n "${lang:-}" ] || continue
+    lang_hint="$lang"
+    [ -n "$(classify_sub_lang "$lang_hint")" ] && return 0
+  done <<< "$lines"
+  return 1
+}
+
+normalize_stream_pid(){
+  local raw="${1:-}"
+  raw="$(lower "${raw// /}")"
+  raw="${raw##*:}"
+  case "$raw" in
+    0x[0-9a-f]*)
+      printf '%d\n' "$((16#${raw#0x}))"
+      ;;
+    ''|unknown|n/a|na)
+      echo ""
+      ;;
+    *)
+      [[ "$raw" =~ ^[0-9]+$ ]] && echo "$raw" || echo ""
+      ;;
+  esac
+}
+
+format_stream_pid(){
+  local pid
+  pid="$(normalize_stream_pid "${1:-}")"
+  if [ -n "$pid" ]; then
+    printf '0x%04X' "$pid"
+  else
+    echo "无"
+  fi
+}
+
+prepare_bluray_probe_context(){
+  local vpath="$1" clip root playlist source_label
+  BLURAY_ROOT=""
+  BLURAY_PLAYLIST=""
+  BLURAY_CLIP=""
+
+  clip="$(basename "$vpath")"
+  clip="${clip%.*}"
+  [[ "$clip" =~ ^[0-9]{5}$ ]] || return 1
+
+  root="$(find_bluray_root_from_video "$vpath")" || return 1
+  playlist="$(find_bluray_playlist_fast "$root" "$clip")" || return 1
+  source_label="本地 MPLS 评分"
+
+  BLURAY_ROOT="$root"
+  BLURAY_PLAYLIST="$playlist"
+  BLURAY_CLIP="$clip"
+  log "[信息] 原盘字幕语言探测优先使用 bluray:${BLURAY_ROOT} -playlist ${BLURAY_PLAYLIST} （来源：${source_label}，clip：${BLURAY_CLIP}）"
+  return 0
+}
+
+probe_subtitle_streams_json(){
+  local input="$1"
+  shift || true
+  ffprobe -probesize "$PROBESIZE" -analyzeduration "$ANALYZE" -v error \
+    "$@" \
+    -select_streams s \
+    -show_entries stream=index,id,codec_name:stream_tags:stream_disposition=default,forced \
+    -of json "$input" 2>/dev/null
+}
+
+probe_bluray_subtitle_streams_json(){
+  local root="$1" playlist="$2" clip="$3"
+  local helper_err helper_out helper_status helper_msg
+  if ! command -v bdsub >/dev/null 2>&1; then
+    log "[提示] 未找到 bdsub，回退 ffprobe bluray playlist 探测。"
+    return 1
+  fi
+
+  helper_err="$(mktemp -t bdsub.XXXXXX.err)" || return 1
+  if helper_out="$(bdsub "$root" --playlist "$playlist" --clip "$clip" 2>"$helper_err")"; then
+    rm -f "$helper_err"
+    if [ -z "$helper_out" ]; then
+      log "[提示] bdsub 未返回结果，回退 ffprobe bluray playlist 探测。"
+      return 1
+    fi
+    log "[信息] 已调用 bdsub：${root} / playlist ${playlist} / clip ${clip}"
+    printf '%s\n' "$helper_out"
+    return 0
+  fi
+
+  helper_status=$?
+  helper_msg="$(tr '\n' ' ' < "$helper_err" 2>/dev/null)"
+  helper_msg="${helper_msg#"${helper_msg%%[![:space:]]*}"}"
+  helper_msg="${helper_msg%"${helper_msg##*[![:space:]]}"}"
+  rm -f "$helper_err"
+  if [ -n "$helper_msg" ]; then
+    log "[提示] bdsub 失败（exit=${helper_status}）：${helper_msg}"
+  else
+    log "[提示] bdsub 失败（exit=${helper_status}），回退 ffprobe bluray playlist 探测。"
+  fi
+  return 1
+}
+
+parse_subtitle_streams_tsv(){
+  local json="$1"
+  jq -r '
+    def first_tag($pattern):
+      (
+        (.tags // {})
+        | to_entries
+        | map(select(.value != null and (.value | tostring) != ""))
+        | map(select(.key | ascii_downcase | test($pattern)))
+        | map(.value | tostring)
+        | .[0]
+      ) // "";
+    def subtitle_language:
+      first_tag("^(language|lang)($|[-_].*)");
+    def subtitle_title:
+      first_tag("^(title|name|handler_name)($|[-_].*)");
+    def subtitle_tags:
+      (
+        (.tags // {})
+        | to_entries
+        | map(select(.value != null and (.value | tostring) != ""))
+        | map("\(.key)=\(.value | tostring)")
+        | join("; ")
+      );
+    .streams[]? | [
+      .index,
+      (.id // ""),
+      (.codec_name // "" | ascii_downcase),
+      (subtitle_language | ascii_downcase),
+      subtitle_title,
+      (.disposition.forced // 0),
+      (.disposition.default // 0),
+      subtitle_tags
+    ] | map(tostring) | join("\u001f")' <<<"$json" 2>/dev/null
+}
+
+parse_bluray_subtitle_streams_tsv(){
+  local json="$1"
+  jq -r '
+    .clip.pg_streams[]? | [
+      (.pid // ""),
+      (.lang // "" | ascii_downcase),
+      (.coding_type // ""),
+      (.char_code // ""),
+      (.subpath_id // ""),
+      (.pid // "")
+    ] | map(tostring) | join("\u001f")' <<<"$json" 2>/dev/null
+}
+
+summarize_bdinfo_probe_json(){
+  local json="$1"
+  jq -r '[
+      (.source // "unknown"),
+      (.clip.clip_id // "unknown"),
+      ((.clip.pg_stream_count // 0) | tostring)
+    ] | join("\u001f")' <<<"$json" 2>/dev/null
+}
+
+log_internal_subtitle_tracks(){
+  local raw_blob="$1" bluray_blob="${2:-}" bluray_mode="${3:-none}"
+  local -a raw_list=() bluray_list=()
+  local -A bluray_lang_by_pid=() bluray_extra_by_pid=()
+  local i raw_line meta_line idx stream_id codec lang title forced is_default tags meta_lang meta_title meta_tags meta_pid meta_coding meta_char meta_subpath raw_pid pid_detail meta_extra
+  local lang_for_pick title_for_pick lang_hint lang_class lang_detail title_detail tag_detail
+
+  [ -n "$raw_blob" ] || return 0
+  mapfile -t raw_list <<< "$raw_blob"
+  [ ${#raw_list[@]} -gt 0 ] || return 0
+  [ -n "$bluray_blob" ] && mapfile -t bluray_list <<< "$bluray_blob"
+
+  if [ "$bluray_mode" = "helper" ]; then
+    for meta_line in "${bluray_list[@]}"; do
+      IFS=$'\x1f' read -r meta_pid meta_lang meta_coding meta_char meta_subpath _ <<< "$meta_line"
+      [ -n "${meta_pid:-}" ] || continue
+      bluray_lang_by_pid["$meta_pid"]="$meta_lang"
+      bluray_extra_by_pid["$meta_pid"]="coding_type=${meta_coding:-无}, char_code=${meta_char:-无}, subpath_id=${meta_subpath:-无}"
+    done
+  fi
+
+  log "[信息] 可用内挂字幕轨（共 ${#raw_list[@]} 条）："
+  for i in "${!raw_list[@]}"; do
+    raw_line="${raw_list[$i]}"
+    IFS=$'\x1f' read -r idx stream_id codec lang title forced is_default tags <<< "$raw_line"
+    [ -n "${idx:-}" ] || continue
+
+    meta_lang=""
+    meta_title=""
+    meta_tags=""
+    meta_extra=""
+    raw_pid="$(normalize_stream_pid "$stream_id")"
+    pid_detail=""
+    [ -n "$raw_pid" ] && pid_detail=" | PID=$(format_stream_pid "$raw_pid")"
+
+    if [ "$bluray_mode" = "helper" ] && [ -n "$raw_pid" ] && [ -n "${bluray_lang_by_pid[$raw_pid]:-}" ]; then
+      meta_lang="${bluray_lang_by_pid[$raw_pid]}"
+      meta_extra="${bluray_extra_by_pid[$raw_pid]:-}"
+    elif [ "$bluray_mode" = "helper" ] && [ ${#bluray_list[@]} -eq ${#raw_list[@]} ] && [ ${#bluray_list[@]} -gt "$i" ]; then
+      meta_line="${bluray_list[$i]}"
+      IFS=$'\x1f' read -r _ meta_lang meta_coding meta_char meta_subpath _ <<< "$meta_line"
+      meta_extra="coding_type=${meta_coding:-无}, char_code=${meta_char:-无}, subpath_id=${meta_subpath:-无}"
+    elif [ "$bluray_mode" = "ffprobe" ] && [ ${#bluray_list[@]} -gt "$i" ]; then
+      meta_line="${bluray_list[$i]}"
+      IFS=$'\x1f' read -r _ _ _ meta_lang meta_title _ _ meta_tags <<< "$meta_line"
+    fi
+
+    lang_for_pick="$lang"
+    [ -n "${meta_lang:-}" ] && [ "$meta_lang" != "unknown" ] && lang_for_pick="$meta_lang"
+    title_for_pick="$title"
+    [ -n "${meta_title:-}" ] && title_for_pick="$meta_title"
+    lang_hint="$(printf '%s %s' "$lang_for_pick" "$title_for_pick")"
+    lang_class="$(classify_sub_lang "$lang_hint")"
+    [ -n "$lang_class" ] || lang_class="未识别"
+
+    if [ "$bluray_mode" = "helper" ] && { [ -n "$meta_lang" ] || [ -n "$meta_extra" ]; }; then
+      lang_detail="ffprobe(file)=$(display_probe_value "$lang") / bdsub=$(display_probe_value "$meta_lang")"
+      title_detail="ffprobe(file)=$(display_probe_value "$title") / bdsub=无"
+    elif [ "$bluray_mode" = "ffprobe" ] && [ ${#bluray_list[@]} -gt "$i" ]; then
+      lang_detail="ffprobe(file)=$(display_probe_value "$lang") / ffprobe(bluray)=$(display_probe_value "$meta_lang")"
+      title_detail="ffprobe(file)=$(display_probe_value "$title") / ffprobe(bluray)=$(display_probe_value "$meta_title")"
+    else
+      lang_detail="ffprobe(file)=$(display_probe_value "$lang")"
+      title_detail="ffprobe(file)=$(display_probe_value "$title")"
+    fi
+
+    log "[字幕] 流索引 $idx / 字幕序号 $i${pid_detail} | 语言：$lang_detail | title：$title_detail | default=$is_default | forced=$forced | codec=$codec | 分类=$lang_class"
+
+    if [ "$lang_class" = "未识别" ]; then
+      tag_detail=""
+      [ -n "$tags" ] && tag_detail="ffprobe(file) tags: $tags"
+      if [ "$bluray_mode" = "helper" ] && [ -n "$meta_extra" ]; then
+        tag_detail="${tag_detail:+$tag_detail | }bdsub: $meta_extra"
+      fi
+      [ -n "$meta_tags" ] && tag_detail="${tag_detail:+$tag_detail | }ffprobe(bluray) tags: $meta_tags"
+      [ -n "$tag_detail" ] && log "[字幕] 流索引 $idx 标签：$tag_detail"
+    fi
+  done
+}
 
 cleanup(){
   if [ "$MOUNTED" -eq 1 ] && [ -n "$MOUNT_DIR" ]; then
@@ -382,29 +711,137 @@ find_external_sub(){
 }
 
 pick_internal_sub(){
-  local vpath="$1" j parsed
-  j=$(ffprobe -probesize "$PROBESIZE" -analyzeduration "$ANALYZE" -v error \
-      -select_streams s \
-      -show_entries stream=index,codec_name:stream_tags=language,title:stream_disposition=default,forced \
-      -of json "$vpath" 2>/dev/null) || true
-  [ -z "$j" ] && return 1
+  local vpath="$1" raw_json bluray_json="" bluray_mode="none"
+  local -a raw_streams=() bluray_streams=()
+  local current_playlist alt_playlist alt_json alt_lines tried_playlists=0 bluray_lines="" raw_lines=""
+  local -A bluray_lang_by_pid=()
 
-  parsed=$(echo "$j" | jq -r '.streams[] | [
-      .index,
-      (.codec_name // "" | ascii_downcase),
-      (.tags.language // "unknown" | ascii_downcase),
-      (.tags.title // ""),
-      (.disposition.forced // 0),
-      (.disposition.default // 0)
-    ] | @tsv' 2>/dev/null) || true
-  [ -z "$parsed" ] && return 1
+  raw_json="$(probe_subtitle_streams_json "$vpath")" || true
+  [ -z "$raw_json" ] && return 1
+  mapfile -t raw_streams < <(parse_subtitle_streams_tsv "$raw_json")
+  [ ${#raw_streams[@]} -gt 0 ] || return 1
+
+  if [ -n "$BLURAY_ROOT" ] && [ -n "$BLURAY_PLAYLIST" ]; then
+    current_playlist="$BLURAY_PLAYLIST"
+    bluray_json="$(probe_bluray_subtitle_streams_json "$BLURAY_ROOT" "$BLURAY_PLAYLIST" "$BLURAY_CLIP")" || true
+    if [ -n "$bluray_json" ]; then
+      mapfile -t bluray_streams < <(parse_bluray_subtitle_streams_tsv "$bluray_json")
+      if [ ${#bluray_streams[@]} -gt 0 ]; then
+        bluray_lines="$(printf '%s\n' "${bluray_streams[@]}")"
+        if ! helper_streams_have_classified_lang "$bluray_lines"; then
+          while IFS= read -r alt_playlist; do
+            [ -n "$alt_playlist" ] || continue
+            [ "$alt_playlist" = "$current_playlist" ] && continue
+            tried_playlists=$((tried_playlists + 1))
+            [ "$tried_playlists" -le "$PLAYLIST_SCAN_MAX" ] || break
+            alt_json="$(probe_bluray_subtitle_streams_json "$BLURAY_ROOT" "$alt_playlist" "$BLURAY_CLIP")" || true
+            [ -n "$alt_json" ] || continue
+            mapfile -t bluray_streams < <(parse_bluray_subtitle_streams_tsv "$alt_json")
+            [ ${#bluray_streams[@]} -gt 0 ] || continue
+            alt_lines="$(printf '%s\n' "${bluray_streams[@]}")"
+            if helper_streams_have_classified_lang "$alt_lines"; then
+              BLURAY_PLAYLIST="$alt_playlist"
+              bluray_lines="$alt_lines"
+              log "[信息] 首选 playlist ${current_playlist} 未识别出中英字幕语言，改用候选 playlist ${alt_playlist}。"
+              break
+            fi
+          done < <(list_bluray_playlists_ranked "$BLURAY_ROOT" "$BLURAY_CLIP")
+        fi
+        bluray_mode="helper"
+        log "[信息] 原盘选轨改用 bdsub（BDInfo-style MPLS/CLPI）字幕元数据：${BLURAY_ROOT} / playlist ${BLURAY_PLAYLIST} / clip ${BLURAY_CLIP}"
+      else
+        local helper_source helper_clip helper_pg_count helper_summary
+        helper_summary="$(summarize_bdinfo_probe_json "$bluray_json")"
+        if [ -n "$helper_summary" ]; then
+          IFS=$'\x1f' read -r helper_source helper_clip helper_pg_count <<< "$helper_summary"
+          log "[提示] bdsub 返回 0 条可用 PG 流（source=${helper_source}，clip=${helper_clip}，pg_stream_count=${helper_pg_count}），回退 ffprobe bluray playlist 探测。"
+        else
+          log "[提示] bdsub 输出无法解析为预期 JSON，回退 ffprobe bluray playlist 探测。"
+        fi
+      fi
+    fi
+
+    if [ "$bluray_mode" = "none" ]; then
+      tried_playlists=0
+      bluray_json="$(probe_subtitle_streams_json "bluray:$BLURAY_ROOT" -playlist "$BLURAY_PLAYLIST")" || true
+      if [ -n "$bluray_json" ]; then
+        mapfile -t bluray_streams < <(parse_subtitle_streams_tsv "$bluray_json")
+        if [ ${#bluray_streams[@]} -eq ${#raw_streams[@]} ] && [ ${#bluray_streams[@]} -gt 0 ]; then
+          bluray_lines="$(printf '%s\n' "${bluray_streams[@]}")"
+          if ! streams_have_classified_lang "$bluray_lines"; then
+            while IFS= read -r alt_playlist; do
+              [ -n "$alt_playlist" ] || continue
+              [ "$alt_playlist" = "$current_playlist" ] && continue
+              tried_playlists=$((tried_playlists + 1))
+              [ "$tried_playlists" -le "$PLAYLIST_SCAN_MAX" ] || break
+              alt_json="$(probe_subtitle_streams_json "bluray:$BLURAY_ROOT" -playlist "$alt_playlist")" || true
+              [ -n "$alt_json" ] || continue
+              mapfile -t bluray_streams < <(parse_subtitle_streams_tsv "$alt_json")
+              if [ ${#bluray_streams[@]} -ne ${#raw_streams[@]} ] || [ ${#bluray_streams[@]} -eq 0 ]; then
+                continue
+              fi
+              alt_lines="$(printf '%s\n' "${bluray_streams[@]}")"
+              if streams_have_classified_lang "$alt_lines"; then
+                BLURAY_PLAYLIST="$alt_playlist"
+                bluray_lines="$alt_lines"
+                log "[信息] 首选 playlist ${current_playlist} 未识别出中英字幕语言，改用候选 playlist ${alt_playlist}。"
+                break
+              fi
+            done < <(list_bluray_playlists_ranked "$BLURAY_ROOT" "$BLURAY_CLIP")
+          fi
+          bluray_mode="ffprobe"
+          log "[信息] 原盘选轨回退到 ffprobe bluray playlist 字幕元数据：bluray:${BLURAY_ROOT} -playlist ${BLURAY_PLAYLIST}"
+        elif [ ${#bluray_streams[@]} -gt 0 ]; then
+          log "[提示] bluray playlist 字幕流数量（${#bluray_streams[@]}）与 m2ts 不一致（${#raw_streams[@]}），本次回退文件探测。"
+          bluray_streams=()
+          bluray_lines=""
+        fi
+      fi
+    fi
+  fi
+
+  raw_lines="$(printf '%s\n' "${raw_streams[@]}")"
+  log_internal_subtitle_tracks "$raw_lines" "$bluray_lines" "$bluray_mode"
+
+  if [ "$bluray_mode" = "helper" ]; then
+    local meta_line meta_pid meta_lang meta_coding meta_char meta_subpath
+    for meta_line in "${bluray_streams[@]}"; do
+      IFS=$'\x1f' read -r meta_pid meta_lang meta_coding meta_char meta_subpath _ <<< "$meta_line"
+      [ -n "${meta_pid:-}" ] || continue
+      bluray_lang_by_pid["$meta_pid"]="$meta_lang"
+    done
+  fi
 
   local best_idx="" best_codec="" best_lang_raw="" best_title="" best_forced="" best_default="" best_lang_class="" best_score=-1
   local fallback_idx="" fallback_codec="" fallback_lang_raw="" fallback_title="" fallback_forced="" fallback_default="" fallback_score=-1
-  local idx codec lang title forced is_default lang_hint lang_class lang_score disp_score score
-  while IFS=$'\t' read -r idx codec lang title forced is_default; do
+  local other_idx="" other_codec="" other_lang_raw="" other_title="" other_forced="" other_default="" other_score=-1
+  local raw_line meta_line idx stream_id codec lang title forced is_default meta_lang meta_title raw_tags meta_tags raw_pid
+  local lang_for_pick title_for_pick lang_hint lang_class lang_score disp_score score i
+  for i in "${!raw_streams[@]}"; do
+    raw_line="${raw_streams[$i]}"
+    IFS=$'\x1f' read -r idx stream_id codec lang title forced is_default raw_tags <<< "$raw_line"
     [ -z "${idx:-}" ] && continue
-    lang_hint="$(printf '%s %s' "$lang" "$title")"
+
+    lang_for_pick="$lang"
+    title_for_pick="$title"
+    if [ "$bluray_mode" = "helper" ]; then
+      raw_pid="$(normalize_stream_pid "$stream_id")"
+      if [ -n "$raw_pid" ] && [ -n "${bluray_lang_by_pid[$raw_pid]:-}" ]; then
+        meta_lang="${bluray_lang_by_pid[$raw_pid]}"
+        [ -n "$meta_lang" ] && lang_for_pick="$meta_lang"
+      elif [ ${#bluray_streams[@]} -eq ${#raw_streams[@]} ] && [ ${#bluray_streams[@]} -gt "$i" ]; then
+        meta_line="${bluray_streams[$i]}"
+        IFS=$'\x1f' read -r _ meta_lang _ _ _ _ <<< "$meta_line"
+        [ -n "${meta_lang:-}" ] && lang_for_pick="$meta_lang"
+      fi
+    elif [ ${#bluray_streams[@]} -gt "$i" ]; then
+      meta_line="${bluray_streams[$i]}"
+      IFS=$'\x1f' read -r _ _ _ meta_lang meta_title _ _ meta_tags <<< "$meta_line"
+      [ -n "${meta_lang:-}" ] && [ "$meta_lang" != "unknown" ] && lang_for_pick="$meta_lang"
+      [ -n "${meta_title:-}" ] && title_for_pick="$meta_title"
+    fi
+
+    lang_hint="$(printf '%s %s' "$lang_for_pick" "$title_for_pick")"
     lang_class="$(classify_sub_lang "$lang_hint")"
     disp_score="$(subtitle_disposition_score "$forced" "$is_default")"
 
@@ -414,8 +851,8 @@ pick_internal_sub(){
       if [ "$score" -gt "$best_score" ]; then
         best_idx="$idx"
         best_codec="$codec"
-        best_lang_raw="$lang"
-        best_title="$title"
+        best_lang_raw="$lang_for_pick"
+        best_title="$title_for_pick"
         best_forced="$forced"
         best_default="$is_default"
         best_lang_class="$lang_class"
@@ -427,13 +864,23 @@ pick_internal_sub(){
     if [ "$is_default" = "1" ] && [ "$disp_score" -gt "$fallback_score" ]; then
       fallback_idx="$idx"
       fallback_codec="$codec"
-      fallback_lang_raw="$lang"
-      fallback_title="$title"
+      fallback_lang_raw="$lang_for_pick"
+      fallback_title="$title_for_pick"
       fallback_forced="$forced"
       fallback_default="$is_default"
       fallback_score="$disp_score"
     fi
-  done <<< "$parsed"
+
+    if [ "$disp_score" -gt "$other_score" ]; then
+      other_idx="$idx"
+      other_codec="$codec"
+      other_lang_raw="$lang_for_pick"
+      other_title="$title_for_pick"
+      other_forced="$forced"
+      other_default="$is_default"
+      other_score="$disp_score"
+    fi
+  done
 
   if [ -z "$best_idx" ] && [ -n "$fallback_idx" ]; then
     best_idx="$fallback_idx"
@@ -443,6 +890,16 @@ pick_internal_sub(){
     best_forced="$fallback_forced"
     best_default="$fallback_default"
     best_lang_class="default"
+  fi
+
+  if [ -z "$best_idx" ] && [ -n "$other_idx" ]; then
+    best_idx="$other_idx"
+    best_codec="$other_codec"
+    best_lang_raw="$other_lang_raw"
+    best_title="$other_title"
+    best_forced="$other_forced"
+    best_default="$other_default"
+    best_lang_class="other"
   fi
 
   [ -n "$best_idx" ] || return 1
@@ -916,6 +1373,7 @@ input_path="$1"; outdir="$2"; shift 2
 # 根据输入选择实际视频文件（可能挂载 ISO）
 video=""
 select_input_from_arg "$input_path"
+prepare_bluray_probe_context "$video" || true
 
 # 字幕选择与时长检测
 choose_subtitle "$video" || true

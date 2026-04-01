@@ -63,6 +63,14 @@ RUN set -eux; \
     chmod +x /out/bdinfo/BDInfo; \
     find /out/bdinfo -type f \( -name '*.pdb' -o -name '*.xml' -o -name '*.dbg' \) -delete
 
+# 构建 BDMV 字幕探测 helper
+FROM --platform=$BUILDPLATFORM alpine:3.19 AS bluray-helper-build
+RUN apk add --no-cache build-base
+WORKDIR /src
+COPY tools/bdmv_subtitle_probe.c ./tools/bdmv_subtitle_probe.c
+RUN mkdir -p /out && \
+    cc -O2 -Wall -Wextra -std=c11 ./tools/bdmv_subtitle_probe.c -o /out/bdsub
+
 # 最终运行环境 (Alpine)
 FROM alpine:3.19 AS runtime
 RUN apk add --no-cache \
@@ -93,9 +101,10 @@ RUN set -eux; \
 
 COPY --from=build /out/minfo /usr/local/bin/minfo
 COPY --from=bdinfo-build /out/bdinfo/BDInfo /opt/bdinfo/BDInfo
+COPY --from=bluray-helper-build /out/bdsub /usr/local/bin/bdsub
 COPY bdinfo.sh /usr/local/bin/bdinfo
 
-RUN chmod +x /usr/local/bin/bdinfo /usr/local/bin/minfo /opt/bdinfo/BDInfo
+RUN chmod +x /usr/local/bin/bdinfo /usr/local/bin/minfo /usr/local/bin/bdsub /opt/bdinfo/BDInfo
 
 ENV BDINFO_BIN=/usr/local/bin/bdinfo
 ENV LANG=C.UTF-8
@@ -133,9 +142,10 @@ RUN GOBIN=/usr/local/bin go install github.com/go-delve/delve/cmd/dlv@latest
 COPY --from=runtime /usr/local/share/minfo/scripts /usr/local/share/minfo/scripts
 COPY --from=runtime /opt/bdinfo /opt/bdinfo
 COPY --from=runtime /usr/local/bin/bdinfo /usr/local/bin/bdinfo
+COPY --from=runtime /usr/local/bin/bdsub /usr/local/bin/bdsub
 COPY --from=runtime /usr/local/bin/sudo /usr/local/bin/sudo
 
-RUN chmod +x /usr/local/bin/dlv /usr/local/bin/bdinfo /usr/local/bin/sudo /opt/bdinfo/BDInfo /usr/local/share/minfo/scripts/*.sh
+RUN chmod +x /usr/local/bin/dlv /usr/local/bin/bdinfo /usr/local/bin/bdsub /usr/local/bin/sudo /opt/bdinfo/BDInfo /usr/local/share/minfo/scripts/*.sh
 
 ENV BDINFO_BIN=/usr/local/bin/bdinfo
 ENV LANG=C.UTF-8
