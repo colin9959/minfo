@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +26,8 @@ const (
 
 	nativeDVDPacketDiscontinuityGap = 30.0
 )
+
+var nativeDVDTitleVOBPattern = regexp.MustCompile(`(?i)^VTS_(\d{2})_([1-9]\d*)\.VOB$`)
 
 const (
 	ModeZip   = "zip"
@@ -127,13 +130,7 @@ func randomScreenshotTimestamps(ctx context.Context, inputPath string, count int
 	}
 	defer cleanup()
 
-	ffmpegSourcePath, _, sourceCleanup, err := prepareSourceForFFmpeg(sourcePath)
-	if err != nil {
-		return nil, err
-	}
-	defer sourceCleanup()
-
-	return randomScreenshotTimestampsForSource(ctx, ffmpegSourcePath, count)
+	return randomScreenshotTimestampsForSource(ctx, sourcePath, count)
 }
 
 func randomScreenshotTimestampsForSource(ctx context.Context, sourcePath string, count int) ([]string, error) {
@@ -158,12 +155,6 @@ func randomScreenshotTimestampsForSource(ctx context.Context, sourcePath string,
 }
 
 func probeMediaDuration(ctx context.Context, ffprobe, path string) (float64, error) {
-	if nativeIsFFconcatSource(path) {
-		if duration, err := probeFFconcatDuration(ctx, ffprobe, path); err == nil {
-			return duration, nil
-		}
-	}
-
 	if nativeIsDVDTitleVOB(path) {
 		if duration, err := probeDVDTitleVOBPacketDuration(ctx, ffprobe, path); err == nil {
 			return duration, nil
@@ -190,22 +181,15 @@ func probeMediaDuration(ctx context.Context, ffprobe, path string) (float64, err
 		return duration, nil
 	}
 
-	if nativeIsFFconcatSource(path) {
-		duration, concatErr := probeFFconcatDuration(ctx, ffprobe, path)
-		if concatErr == nil {
-			return duration, nil
-		}
-		if duration, mediaErr := probeMediaInfoDuration(ctx, path); mediaErr == nil {
-			return duration, nil
-		}
-		return 0, fmt.Errorf("ffprobe returned unusable duration: format probe (%v); stream probe (%v); ffconcat fallback (%v)", parseErr, streamErr, concatErr)
-	}
-
 	if duration, mediaErr := probeMediaInfoDuration(ctx, path); mediaErr == nil {
 		return duration, nil
 	}
 
 	return 0, fmt.Errorf("ffprobe returned unusable duration: format probe (%v); stream probe (%v)", parseErr, streamErr)
+}
+
+func nativeIsDVDTitleVOB(path string) bool {
+	return nativeDVDTitleVOBPattern.MatchString(filepath.Base(strings.TrimSpace(path)))
 }
 
 func runFFprobeDuration(ctx context.Context, ffprobe, path, entries string) (string, string, error) {
@@ -215,26 +199,6 @@ func runFFprobeDuration(ctx context.Context, ffprobe, path, entries string) (str
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		path,
 	)
-}
-
-func probeFFconcatDuration(ctx context.Context, ffprobe, path string) (float64, error) {
-	files, err := nativeReadFFconcatFiles(path)
-	if err != nil {
-		return 0, err
-	}
-
-	total := 0.0
-	for _, file := range files {
-		duration, err := probeMediaDuration(ctx, ffprobe, file)
-		if err != nil {
-			return 0, fmt.Errorf("probe %s: %w", filepath.Base(file), err)
-		}
-		total += duration
-	}
-	if total <= 0 {
-		return 0, errors.New("ffconcat duration sum is not positive")
-	}
-	return total, nil
 }
 
 func probeDVDTitleVOBPacketDuration(ctx context.Context, ffprobe, path string) (float64, error) {

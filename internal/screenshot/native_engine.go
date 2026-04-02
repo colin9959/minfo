@@ -60,14 +60,6 @@ type nativeSubtitleSpan struct {
 	End   float64
 }
 
-type nativeConcatSegment struct {
-	Path     string
-	Start    float64
-	Duration float64
-	End      float64
-	ProbePTS float64
-}
-
 type nativeSubtitleTrack struct {
 	Index     int
 	StreamID  string
@@ -128,7 +120,6 @@ type nativeFFprobePacket struct {
 type nativeScreenshotRunner struct {
 	ctx              context.Context
 	sourcePath       string
-	dvdProbePath     string
 	dvdMediaInfoPath string
 	outputDir        string
 	variant          string
@@ -141,9 +132,10 @@ type nativeScreenshotRunner struct {
 	bdsubBin         string
 	logLines         []string
 
-	blurayContext nativeBlurayProbeContext
-	subtitle      nativeSubtitleSelection
-	subtitleIndex []nativeSubtitleSpan
+	blurayContext            nativeBlurayProbeContext
+	subtitle                 nativeSubtitleSelection
+	subtitleIndex            []nativeSubtitleSpan
+	rejectedBitmapCandidates map[string]struct{}
 
 	startOffset float64
 	duration    float64
@@ -151,8 +143,6 @@ type nativeScreenshotRunner struct {
 	videoHeight int
 	colorInfo   string
 	colorChain  string
-
-	concatTimeline []nativeConcatSegment
 }
 
 func runNativeScreenshotsWithLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int) (ScriptResult, error) {
@@ -169,25 +159,18 @@ func runNativeScreenshotsWithLogs(ctx context.Context, inputPath, outputDir, var
 		dvdMediaInfoPath = ""
 	}
 
-	ffmpegSourcePath, dvdProbePath, sourceCleanup, err := prepareSourceForFFmpeg(sourcePath)
-	if err != nil {
-		return ScriptResult{}, err
-	}
-	defer sourceCleanup()
-
-	timestamps, err := randomScreenshotTimestampsForSource(ctx, ffmpegSourcePath, count)
+	timestamps, err := randomScreenshotTimestampsForSource(ctx, sourcePath, count)
 	if err != nil {
 		return ScriptResult{}, err
 	}
 
-	return runNativeScreenshotsFromSource(ctx, ffmpegSourcePath, dvdProbePath, dvdMediaInfoPath, outputDir, variant, subtitleMode, timestamps)
+	return runNativeScreenshotsFromSource(ctx, sourcePath, dvdMediaInfoPath, outputDir, variant, subtitleMode, timestamps)
 }
 
-func runNativeScreenshotsFromSource(ctx context.Context, sourcePath, dvdProbePath, dvdMediaInfoPath, outputDir, variant, subtitleMode string, timestamps []string) (ScriptResult, error) {
+func runNativeScreenshotsFromSource(ctx context.Context, sourcePath, dvdMediaInfoPath, outputDir, variant, subtitleMode string, timestamps []string) (ScriptResult, error) {
 	runner := &nativeScreenshotRunner{
 		ctx:              ctx,
 		sourcePath:       sourcePath,
-		dvdProbePath:     dvdProbePath,
 		dvdMediaInfoPath: dvdMediaInfoPath,
 		outputDir:        outputDir,
 		variant:          NormalizeVariant(variant),
@@ -199,9 +182,6 @@ func runNativeScreenshotsFromSource(ctx context.Context, sourcePath, dvdProbePat
 	}
 
 	runner.logf("[信息] 已切换为 Go 截图引擎。")
-	if runner.dvdProbePath != "" && runner.dvdProbePath != runner.sourcePath {
-		runner.logf("[信息] DVD 多段 VOB 已拼接为单一 ffconcat 输入：%s", filepath.Base(runner.sourcePath))
-	}
 	if nativeLooksLikeDVDSource(runner.dvdProbeSource()) {
 		runner.logf("[信息] DVD 已选片段：VOB=%s | IFO=%s",
 			nativeDisplayProbeValue(runner.dvdSelectedVOBPath()),
@@ -231,7 +211,7 @@ func nativeVariantSettingsFor(variant string) nativeVariantSettings {
 			CoarseBackPGS:  8,
 			SearchBack:     4,
 			SearchForward:  8,
-			JPGQuality:     85,
+			JPGQuality:     2,
 		}
 	default:
 		return nativeVariantSettings{
@@ -286,12 +266,6 @@ func (r *nativeScreenshotRunner) init(timestamps []string) error {
 	r.duration, err = probeMediaDuration(r.ctx, r.ffprobeBin, r.sourcePath)
 	if err != nil {
 		return err
-	}
-	if r.useDVDConcatSegments() {
-		r.concatTimeline, _ = r.buildConcatTimeline()
-		if len(r.concatTimeline) > 0 {
-			r.duration = r.concatTimeline[len(r.concatTimeline)-1].End
-		}
 	}
 	r.videoWidth, r.videoHeight = r.detectVideoDimensions()
 
@@ -1190,9 +1164,10 @@ func (r *nativeScreenshotRunner) alignToSubtitle(requested float64) float64 {
 				r.logf("[对齐] 请求 %s → 就近/扩窗字幕 %s", nativeSecToHMSMS(requested), nativeSecToHMSMS(confirmed))
 				return confirmed
 			}
+		} else {
+			r.logf("[对齐] 请求 %s → 就近/扩窗字幕 %s", nativeSecToHMSMS(requested), nativeSecToHMSMS(candidate))
+			return candidate
 		}
-		r.logf("[对齐] 请求 %s → 就近/扩窗字幕 %s", nativeSecToHMSMS(requested), nativeSecToHMSMS(candidate))
-		return candidate
 	}
 
 	if candidate, ok := r.snapExpandedWindow(requested); ok {
@@ -1202,9 +1177,10 @@ func (r *nativeScreenshotRunner) alignToSubtitle(requested float64) float64 {
 				r.logf("[对齐] 请求 %s → 扩窗字幕 %s", nativeSecToHMSMS(requested), nativeSecToHMSMS(confirmed))
 				return confirmed
 			}
+		} else {
+			r.logf("[对齐] 请求 %s → 扩窗字幕 %s", nativeSecToHMSMS(requested), nativeSecToHMSMS(candidate))
+			return candidate
 		}
-		r.logf("[对齐] 请求 %s → 扩窗字幕 %s", nativeSecToHMSMS(requested), nativeSecToHMSMS(candidate))
-		return candidate
 	}
 
 	if r.subtitle.Mode == "internal" && r.isBitmapSubtitle() {
@@ -1325,6 +1301,11 @@ func (r *nativeScreenshotRunner) findNearestBitmapSubtitle(requested float64) (f
 
 func (r *nativeScreenshotRunner) acceptBitmapSubtitleCandidate(label string, candidate float64) (float64, bool) {
 	candidate = r.clampToDuration(candidate)
+	key := nativeBitmapCandidateKey(candidate)
+	if _, rejected := r.rejectedBitmapCandidates[key]; rejected {
+		return 0, false
+	}
+
 	visible, err := r.bitmapSubtitleVisibleAt(candidate)
 	if err != nil {
 		r.logf("[提示] %s候选可视性验证失败，沿用该时间点：%s | 原因：%s",
@@ -1335,6 +1316,10 @@ func (r *nativeScreenshotRunner) acceptBitmapSubtitleCandidate(label string, can
 		return candidate, true
 	}
 	if !visible {
+		if r.rejectedBitmapCandidates == nil {
+			r.rejectedBitmapCandidates = make(map[string]struct{})
+		}
+		r.rejectedBitmapCandidates[key] = struct{}{}
 		r.logf("[提示] %s候选未实际渲染出字幕，继续搜索：%s",
 			label,
 			nativeSecToHMSMS(candidate),
@@ -1406,10 +1391,6 @@ func (r *nativeScreenshotRunner) buildSubtitleIndex() []nativeSubtitleSpan {
 }
 
 func (r *nativeScreenshotRunner) probeBitmapSpans(startAbs, duration float64) ([]nativeSubtitleSpan, error) {
-	if r.useDVDConcatSegments() {
-		return r.probeConcatBitmapSpans(startAbs, duration)
-	}
-
 	args := []string{
 		"-probesize", r.settings.ProbeSize,
 		"-analyzeduration", r.settings.Analyze,
@@ -1520,118 +1501,6 @@ func (r *nativeScreenshotRunner) probePacketSpans(args []string, internal bool, 
 	return spans, nil
 }
 
-func (r *nativeScreenshotRunner) probeConcatBitmapSpans(startAbs, duration float64) ([]nativeSubtitleSpan, error) {
-	if len(r.concatTimeline) == 0 {
-		return nil, nil
-	}
-
-	windowStart := startAbs
-	windowEnd := startAbs + duration
-	if duration <= 0 {
-		windowEnd = math.Inf(1)
-	}
-
-	all := make([]nativeSubtitleSpan, 0, 32)
-	for _, segment := range r.concatTimeline {
-		if segment.End <= windowStart {
-			continue
-		}
-		if segment.Start >= windowEnd {
-			break
-		}
-
-		localStart := 0.0
-		if windowStart > segment.Start {
-			localStart = windowStart - segment.Start
-		}
-		localDuration := segment.Duration - localStart
-		if duration > 0 {
-			localEnd := segment.Duration
-			if windowEnd < segment.End {
-				localEnd = windowEnd - segment.Start
-			}
-			localDuration = localEnd - localStart
-		}
-		if localDuration <= 0 {
-			continue
-		}
-
-		probeStart := segment.ProbePTS + localStart
-		spans, err := r.probeBitmapSpansOnInput(segment.Path, probeStart, localDuration, segment.Start, segment.ProbePTS)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, spans...)
-	}
-
-	sort.Slice(all, func(i, j int) bool {
-		if all[i].Start == all[j].Start {
-			return all[i].End < all[j].End
-		}
-		return all[i].Start < all[j].Start
-	})
-	return all, nil
-}
-
-func (r *nativeScreenshotRunner) probeBitmapSpansOnInput(input string, probeStart, durationLocal, globalOffset, probeBase float64) ([]nativeSubtitleSpan, error) {
-	args := []string{
-		"-probesize", r.settings.ProbeSize,
-		"-analyzeduration", r.settings.Analyze,
-		"-v", "error",
-		"-select_streams", fmt.Sprintf("s:%d", r.subtitle.RelativeIndex),
-	}
-	if probeStart >= 0 {
-		args = append(args, "-read_intervals", nativeReadInterval(probeStart, durationLocal))
-	}
-	args = append(args,
-		"-show_packets",
-		"-show_entries", "packet=pts_time,duration_time,size",
-		"-of", "json",
-		input,
-	)
-
-	stdout, stderr, err := system.RunCommand(r.ctx, r.ffprobeBin, args...)
-	if err != nil {
-		return nil, fmt.Errorf(system.BestErrorMessage(err, stderr, stdout))
-	}
-	if strings.TrimSpace(stdout) == "" {
-		return nil, nil
-	}
-
-	var payload nativeFFprobePacketsPayload
-	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
-		return nil, err
-	}
-
-	spans := make([]nativeSubtitleSpan, 0, len(payload.Packets))
-	bitmapMinSize := nativeBitmapPacketMinSize(r.subtitle.Codec)
-	for _, packet := range payload.Packets {
-		pts, ok := nativeParseFloatString(packet.PTSTime)
-		if !ok {
-			continue
-		}
-		durationValue, ok := nativeParseFloatString(packet.DurationTime)
-		if !ok {
-			durationValue = nativeDefaultSubDur
-		}
-		sizeValue, ok := nativeParseIntString(packet.Size)
-		if !ok || sizeValue < bitmapMinSize {
-			continue
-		}
-
-		start := globalOffset + (pts - probeBase)
-		end := globalOffset + (pts + durationValue - probeBase)
-		if end < 0 {
-			continue
-		}
-		if start < 0 {
-			start = 0
-		}
-		spans = append(spans, nativeSubtitleSpan{Start: start, End: end})
-	}
-	return nativeMergeNearbySubtitleSpans(spans, 0.75), nil
-}
-
 func (r *nativeScreenshotRunner) captureScreenshot(aligned float64, path string) error {
 	if err := r.capturePrimary(aligned, path); err != nil {
 		return err
@@ -1670,22 +1539,11 @@ func (r *nativeScreenshotRunner) bitmapSubtitleVisibleAt(aligned float64) (bool,
 		return false, nil
 	}
 
-	inputPath := r.sourcePath
-	localTime := aligned
-	if r.useDVDConcatSegments() {
-		segment, local, ok := r.locateConcatSegment(aligned)
-		if !ok {
-			return false, errors.New("concat segment not found for subtitle visibility probe")
-		}
-		inputPath = segment.Path
-		localTime = local
-	}
-
-	baseFrame, err := r.captureBitmapProbeFrame(inputPath, localTime, false)
+	baseFrame, err := r.captureBitmapProbeFrame(r.sourcePath, aligned, false)
 	if err != nil {
 		return false, err
 	}
-	subFrame, err := r.captureBitmapProbeFrame(inputPath, localTime, true)
+	subFrame, err := r.captureBitmapProbeFrame(r.sourcePath, aligned, true)
 	if err != nil {
 		return false, err
 	}
@@ -1738,14 +1596,6 @@ func (r *nativeScreenshotRunner) captureBitmapProbeFrame(inputPath string, local
 }
 
 func (r *nativeScreenshotRunner) capturePrimary(aligned float64, path string) error {
-	if r.subtitle.Mode == "internal" && r.isBitmapSubtitle() && r.useDVDConcatSegments() {
-		return r.captureConcatBitmapStill(aligned, path, r.primaryOutputArgs(), "")
-	}
-
-	if r.subtitle.Mode == "none" && len(r.concatTimeline) > 0 {
-		return r.captureConcatStill(aligned, path, r.primaryOutputArgs(), "")
-	}
-
 	if r.subtitle.Mode == "external" {
 		if _, err := os.Stat(r.subtitle.File); err != nil {
 			return fmt.Errorf("subtitle file not found before render: %w", err)
@@ -1820,14 +1670,6 @@ func (r *nativeScreenshotRunner) captureReencoded(aligned float64, path string) 
 }
 
 func (r *nativeScreenshotRunner) capturePNGReencoded(aligned float64, path string) error {
-	if r.subtitle.Mode == "internal" && r.isBitmapSubtitle() && r.useDVDConcatSegments() {
-		return r.captureConcatBitmapStill(aligned, path, []string{"-c:v", "png", "-compression_level", "9", "-pred", "mixed"}, r.colorChain)
-	}
-
-	if r.subtitle.Mode == "none" && len(r.concatTimeline) > 0 {
-		return r.captureConcatStill(aligned, path, []string{"-c:v", "png", "-compression_level", "9", "-pred", "mixed"}, r.colorChain)
-	}
-
 	coarseBack := r.settings.CoarseBackText
 	if r.subtitle.Mode == "internal" && r.isBitmapSubtitle() {
 		coarseBack = r.settings.CoarseBackPGS
@@ -1894,22 +1736,6 @@ func (r *nativeScreenshotRunner) capturePNGReencoded(aligned float64, path strin
 }
 
 func (r *nativeScreenshotRunner) captureJPGReencoded(aligned float64, path string) error {
-	if r.subtitle.Mode == "internal" && r.isBitmapSubtitle() && r.useDVDConcatSegments() {
-		quality := r.settings.JPGQuality - 15
-		if quality < 50 {
-			quality = 50
-		}
-		return r.captureConcatBitmapStill(aligned, path, []string{"-c:v", "mjpeg", "-q:v", strconv.Itoa(quality)}, "")
-	}
-
-	if r.subtitle.Mode == "none" && len(r.concatTimeline) > 0 {
-		quality := r.settings.JPGQuality - 15
-		if quality < 50 {
-			quality = 50
-		}
-		return r.captureConcatStill(aligned, path, []string{"-c:v", "mjpeg", "-q:v", strconv.Itoa(quality)}, "")
-	}
-
 	coarseBack := r.settings.CoarseBackText
 	if r.subtitle.Mode == "internal" && r.isBitmapSubtitle() {
 		coarseBack = r.settings.CoarseBackPGS
@@ -1919,10 +1745,7 @@ func (r *nativeScreenshotRunner) captureJPGReencoded(aligned float64, path strin
 	fineSecond := aligned - float64(coarseSecond)
 	coarseHMS := nativeFormatScriptTimestamp(coarseSecond)
 
-	quality := r.settings.JPGQuality - 15
-	if quality < 50 {
-		quality = 50
-	}
+	quality := nativeFallbackJPGQScale(r.settings.JPGQuality)
 
 	if r.subtitle.Mode == "internal" && r.isBitmapSubtitle() {
 		filterComplex := nativeJoinFilters(
@@ -1978,7 +1801,7 @@ func (r *nativeScreenshotRunner) captureJPGReencoded(aligned float64, path strin
 
 func (r *nativeScreenshotRunner) primaryOutputArgs() []string {
 	if r.variant == VariantJPG {
-		return []string{"-c:v", "mjpeg", "-q:v", strconv.Itoa(r.settings.JPGQuality)}
+		return []string{"-c:v", "mjpeg", "-q:v", strconv.Itoa(nativeClampJPGQScale(r.settings.JPGQuality))}
 	}
 	return []string{"-c:v", "png", "-compression_level", "9", "-pred", "mixed"}
 }
@@ -1989,140 +1812,6 @@ func (r *nativeScreenshotRunner) runFFmpeg(args []string) error {
 		return fmt.Errorf(system.BestErrorMessage(err, stderr, stdout))
 	}
 	return nil
-}
-
-func (r *nativeScreenshotRunner) buildConcatTimeline() ([]nativeConcatSegment, error) {
-	files, err := nativeReadFFconcatFiles(r.sourcePath)
-	if err != nil {
-		return nil, err
-	}
-
-	timeline := make([]nativeConcatSegment, 0, len(files))
-	start := 0.0
-	for _, file := range files {
-		duration, err := probeMediaDuration(r.ctx, r.ffprobeBin, file)
-		if err != nil {
-			return nil, err
-		}
-		segment := nativeConcatSegment{
-			Path:     file,
-			Start:    start,
-			Duration: duration,
-			End:      start + duration,
-			ProbePTS: r.detectStartOffsetForInput(file),
-		}
-		timeline = append(timeline, segment)
-		start = segment.End
-	}
-
-	if len(timeline) > 0 {
-		r.logf("[信息] DVD 分段时间轴已建立：%d 段。", len(timeline))
-	}
-	return timeline, nil
-}
-
-func (r *nativeScreenshotRunner) locateConcatSegment(aligned float64) (nativeConcatSegment, float64, bool) {
-	if len(r.concatTimeline) == 0 {
-		return nativeConcatSegment{}, 0, false
-	}
-
-	target := aligned
-	if target < 0 {
-		target = 0
-	}
-
-	for index, segment := range r.concatTimeline {
-		last := index == len(r.concatTimeline)-1
-		if target < segment.End || last {
-			local := target - segment.Start
-			if local < 0 {
-				local = 0
-			}
-			maxLocal := segment.Duration
-			if maxLocal > 0.040 {
-				maxLocal -= 0.040
-			}
-			if local > maxLocal {
-				local = maxLocal
-			}
-			return segment, local, true
-		}
-	}
-
-	return nativeConcatSegment{}, 0, false
-}
-
-func (r *nativeScreenshotRunner) captureConcatStill(aligned float64, path string, outputArgs []string, filterChain string) error {
-	segment, localTime, ok := r.locateConcatSegment(aligned)
-	if !ok {
-		return errors.New("concat segment not found for screenshot timestamp")
-	}
-
-	args := []string{
-		"-v", "error",
-		"-fflags", "+genpts",
-		"-ss", nativeFormatFloat(localTime),
-		"-probesize", r.settings.ProbeSize,
-		"-analyzeduration", r.settings.Analyze,
-		"-i", segment.Path,
-		"-map", "0:v:0",
-		"-frames:v", "1",
-		"-y",
-	}
-	displayFilter := nativeJoinFilters(filterChain, nativeBuildDisplayAspectFilter())
-	if strings.TrimSpace(displayFilter) != "" {
-		args = append(args, "-vf", displayFilter)
-	}
-	args = append(args, outputArgs...)
-	args = append(args, path)
-
-	r.logf("[信息] DVD 分段截图：全片 %s → 分段 %s @ %s",
-		nativeSecToHMSMS(aligned),
-		filepath.Base(segment.Path),
-		nativeSecToHMSMS(localTime),
-	)
-	return r.runFFmpeg(args)
-}
-
-func (r *nativeScreenshotRunner) captureConcatBitmapStill(aligned float64, path string, outputArgs []string, tailFilter string) error {
-	segment, localTime, ok := r.locateConcatSegment(aligned)
-	if !ok {
-		return errors.New("concat segment not found for subtitle screenshot timestamp")
-	}
-
-	coarseBack := r.settings.CoarseBackPGS
-	coarseSecond := int(math.Max(math.Floor(localTime)-float64(coarseBack), 0))
-	fineSecond := localTime - float64(coarseSecond)
-	coarseHMS := nativeFormatScriptTimestamp(coarseSecond)
-
-	filterComplex := nativeJoinFilters(
-		fmt.Sprintf("[0:v:0][0:s:%d]overlay=(W-w)/2:(H-h-10)", r.subtitle.RelativeIndex),
-		tailFilter,
-		nativeBuildDisplayAspectFilter(),
-	)
-
-	args := []string{
-		"-v", "error",
-		"-fflags", "+genpts",
-		"-ss", coarseHMS,
-		"-probesize", r.settings.ProbeSize,
-		"-analyzeduration", r.settings.Analyze,
-		"-i", segment.Path,
-		"-ss", nativeFormatFloat(fineSecond),
-		"-filter_complex", filterComplex,
-		"-frames:v", "1",
-		"-y",
-	}
-	args = append(args, outputArgs...)
-	args = append(args, path)
-
-	r.logf("[信息] DVD 分段字幕截图：全片 %s → 分段 %s @ %s / 字幕序号 %d",
-		nativeSecToHMSMS(aligned),
-		filepath.Base(segment.Path),
-		nativeSecToHMSMS(localTime),
-		r.subtitle.RelativeIndex,
-	)
-	return r.runFFmpeg(args)
 }
 
 func (r *nativeScreenshotRunner) buildTextSubtitleFilter() string {
@@ -2203,9 +1892,6 @@ func (r *nativeScreenshotRunner) logSelectedSubtitleSummary() {
 }
 
 func (r *nativeScreenshotRunner) subtitleProbeSource() string {
-	if r.useDVDConcatSegments() {
-		return r.dvdProbeSource()
-	}
 	return r.sourcePath
 }
 
@@ -2241,14 +1927,7 @@ func (r *nativeScreenshotRunner) dvdSelectedVOBPath() string {
 }
 
 func (r *nativeScreenshotRunner) dvdProbeSource() string {
-	if strings.TrimSpace(r.dvdProbePath) != "" {
-		return r.dvdProbePath
-	}
 	return r.sourcePath
-}
-
-func (r *nativeScreenshotRunner) useDVDConcatSegments() bool {
-	return nativeIsFFconcatSource(r.sourcePath) && nativeLooksLikeDVDSource(r.dvdProbeSource())
 }
 
 func nativeSubtitleCodecFromPath(path string) string {
@@ -2468,6 +2147,29 @@ func nativeClampInsideSpan(value float64, span nativeSubtitleSpan, epsilon float
 
 func nativeBitmapSnapPoint(span nativeSubtitleSpan, epsilon float64) float64 {
 	return nativeClampInsideSpan(span.Start+(span.End-span.Start)/2, span, epsilon)
+}
+
+func nativeBitmapCandidateKey(value float64) string {
+	return strconv.FormatInt(int64(math.Round(value*1000)), 10)
+}
+
+func nativeClampJPGQScale(value int) int {
+	if value < 2 {
+		return 2
+	}
+	if value > 31 {
+		return 31
+	}
+	return value
+}
+
+func nativeFallbackJPGQScale(value int) int {
+	value = nativeClampJPGQScale(value)
+	value += 2
+	if value > 6 {
+		return 6
+	}
+	return value
 }
 
 func nativeMergeNearbySubtitleSpans(spans []nativeSubtitleSpan, maxGap float64) []nativeSubtitleSpan {
