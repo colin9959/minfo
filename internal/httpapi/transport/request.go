@@ -1,8 +1,8 @@
 package transport
 
 import (
+	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"minfo/internal/config"
+	"minfo/internal/media"
 )
 
 func EnsurePost(w http.ResponseWriter, r *http.Request) bool {
@@ -36,11 +37,9 @@ func InputPath(r *http.Request) (string, func(), error) {
 	path := strings.TrimSpace(r.FormValue("path"))
 	path = strings.Trim(path, "\"")
 	if path != "" {
-		path = filepath.Clean(path)
-		if _, err := os.Stat(path); err != nil {
-			return "", func() {}, fmt.Errorf("path not found: %v", err)
-		}
-		return path, func() {}, nil
+		ctx, cancel := context.WithTimeout(r.Context(), config.RequestTimeout)
+		defer cancel()
+		return media.ResolveInputPath(ctx, path)
 	}
 
 	file, header, err := r.FormFile("file")

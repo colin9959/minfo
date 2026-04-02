@@ -28,10 +28,19 @@ func PathSuggestHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	responseItems := make([]transport.PathItem, 0, len(items))
+	for _, item := range items {
+		responseItems = append(responseItems, transport.PathItem{
+			Path:  item.Path,
+			IsDir: item.IsDir,
+			Size:  item.Size,
+		})
+	}
+
 	transport.WritePathJSON(w, http.StatusOK, transport.PathResponse{
 		OK:    true,
 		Root:  root,
 		Roots: roots,
-		Items: items,
+		Items: responseItems,
 	})
 }

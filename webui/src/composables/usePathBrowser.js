@@ -2,6 +2,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { fetchDirectory } from "../api/media";
 import {
     buildEntries,
+    buildVirtualISOPath,
     canNavigateUp as computeCanNavigateUp,
     cleanPath,
     filterEntries,
@@ -82,12 +83,24 @@ export function usePathBrowser(options = {}) {
         await loadDirectory(browserDir.value || "");
     };
 
-    const handleEntryDoubleClick = async (entry) => {
+    const handleEntryEnter = async (entry) => {
         if (browserLoading.value) {
             return;
         }
         if (entry.isDir) {
             await loadDirectory(entry.path);
+            return;
+        }
+        if (entry.isISO) {
+            await loadDirectory(buildVirtualISOPath(entry.path));
+            return;
+        }
+        path.value = entry.path;
+    };
+
+    const handleEntryDoubleClick = async (entry) => {
+        if (entry.isDir) {
+            await handleEntryEnter(entry);
             return;
         }
         path.value = entry.path;
@@ -119,6 +132,7 @@ export function usePathBrowser(options = {}) {
         hasInput,
         navigateUp,
         refreshBrowser,
+        handleEntryEnter,
         handleEntryDoubleClick,
     };
 }

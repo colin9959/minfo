@@ -2,15 +2,14 @@ package handlers
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"minfo/internal/config"
 	"minfo/internal/httpapi/transport"
+	"minfo/internal/media"
 	"minfo/internal/screenshot"
 )
 
@@ -91,11 +90,12 @@ func handleScreenshotZipDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path, err := inputPathFromQuery(r)
+	path, cleanup, err := inputPathFromQuery(r)
 	if err != nil {
 		transport.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	defer cleanup()
 	variant := screenshot.NormalizeVariant(r.URL.Query().Get("variant"))
 	subtitleMode := screenshot.NormalizeSubtitleMode(r.URL.Query().Get("subtitle_mode"))
 	count := screenshot.NormalizeCount(r.URL.Query().Get("count"))
@@ -172,15 +172,10 @@ func servePreparedScreenshotDownload(w http.ResponseWriter, r *http.Request, tok
 	http.ServeFile(w, r, filePath)
 }
 
-func inputPathFromQuery(r *http.Request) (string, error) {
+func inputPathFromQuery(r *http.Request) (string, func(), error) {
 	path := strings.TrimSpace(r.URL.Query().Get("path"))
 	path = strings.Trim(path, "\"")
-	if path == "" {
-		return "", fmt.Errorf("missing path")
-	}
-	path = filepath.Clean(path)
-	if _, err := os.Stat(path); err != nil {
-		return "", fmt.Errorf("path not found: %v", err)
-	}
-	return path, nil
+	ctx, cancel := context.WithTimeout(r.Context(), config.RequestTimeout)
+	defer cancel()
+	return media.ResolveInputPath(ctx, path)
 }

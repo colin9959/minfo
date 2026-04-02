@@ -56,7 +56,24 @@
                         @click="$emit('update:path', entry.path)"
                         @dblclick="$emit('open-entry', entry)"
                     >
-                        <span class="browser-row-name">{{ entry.isDir ? `📁 ${entry.name}` : `📄 ${entry.name}` }}</span>
+                        <div class="browser-row-main">
+                            <span class="browser-row-icon" aria-hidden="true">{{ entryIcon(entry) }}</span>
+                            <span class="browser-row-name">{{ entry.name }}</span>
+                        </div>
+                        <div class="browser-row-side">
+                            <span v-if="showEntrySize(entry)" class="browser-row-size">{{ formatEntrySize(entry.size) }}</span>
+                            <button
+                                v-if="entry.isISO"
+                                class="ghost browser-enter-btn"
+                                type="button"
+                                :disabled="busy || browserLoading"
+                                title="进入 ISO"
+                                aria-label="进入 ISO"
+                                @click.stop="$emit('enter-entry', entry)"
+                            >
+                                进入
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -65,6 +82,8 @@
 </template>
 
 <script setup>
+import { formatFileSize } from "../utils/path-browser";
+
 defineProps({
     path: { type: String, required: true },
     searchKeyword: { type: String, required: true },
@@ -76,7 +95,7 @@ defineProps({
     entries: { type: Array, required: true },
 });
 
-defineEmits(["update:path", "update:searchKeyword", "navigate-up", "refresh", "open-entry"]);
+defineEmits(["update:path", "update:searchKeyword", "navigate-up", "refresh", "open-entry", "enter-entry"]);
 
 const normalizeComparePath = (value) => {
     if (!value) {
@@ -87,4 +106,21 @@ const normalizeComparePath = (value) => {
     }
     return value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 };
+
+const entryIcon = (entry) => {
+    if (entry?.isDir) {
+        return "📁";
+    }
+    if (entry?.isISO) {
+        return "💿";
+    }
+    if (entry?.isVideo) {
+        return "🎬";
+    }
+    return "📄";
+};
+
+const showEntrySize = (entry) => !entry?.isDir && Number.isFinite(entry?.size) && entry.size > 0;
+
+const formatEntrySize = (value) => formatFileSize(value);
 </script>

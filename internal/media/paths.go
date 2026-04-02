@@ -1,16 +1,28 @@
 package media
 
 import (
+	"context"
 	"errors"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 )
 
-func SuggestPaths(roots []string, prefix string, limit int) ([]string, string, error) {
+type SuggestedPath struct {
+	Path  string
+	IsDir bool
+	Size  int64
+}
+
+func SuggestPaths(roots []string, prefix string, limit int) ([]SuggestedPath, string, error) {
 	if len(roots) == 0 {
 		return nil, "", errors.New("no MEDIA_ROOT configured")
+	}
+
+	if isVirtualISOPath(prefix) {
+		return suggestVirtualISOPaths(roots, prefix, limit)
 	}
 
 	if prefix == "" {
@@ -18,9 +30,12 @@ func SuggestPaths(roots []string, prefix string, limit int) ([]string, string, e
 			items, err := listDir(roots[0], "", limit)
 			return items, roots[0], err
 		}
-		items := make([]string, 0, len(roots))
+		items := make([]SuggestedPath, 0, len(roots))
 		for _, root := range roots {
-			items = append(items, withDirSuffix(root))
+			items = append(items, SuggestedPath{
+				Path:  withDirSuffix(root),
+				IsDir: true,
+			})
 		}
 		return items, "", nil
 	}
@@ -105,28 +120,122 @@ func withDirSuffix(path string) string {
 	return path + string(filepath.Separator)
 }
 
-func listDir(dir, base string, limit int) ([]string, error) {
+func suggestVirtualISOPaths(roots []string, prefix string, limit int) ([]SuggestedPath, string, error) {
+	isoPath, inner, ok := parseVirtualISOPath(prefix)
+	if !ok {
+		return nil, "", errors.New("invalid ISO browser path")
+	}
+
+	selectedRoot, ok := findContainingRoot(roots, isoPath)
+	if !ok {
+		return nil, "", errors.New("path is outside MEDIA_ROOTS")
+	}
+
+	mountDir, cleanup, err := mountISO(context.Background(), isoPath)
+	if err != nil {
+		return nil, "", err
+	}
+	defer cleanup()
+
+	dirInner := inner
+	base := ""
+	if !hasDirectorySuffix(prefix) {
+		dirInner = path.Dir(inner)
+		base = path.Base(inner)
+		if dirInner == "." {
+			dirInner = "/"
+		}
+		if base == "." || base == "/" {
+			base = ""
+		}
+	}
+
+	dirOnDisk := mountDir
+	if dirInner != "/" {
+		dirOnDisk = filepath.Join(mountDir, filepath.FromSlash(strings.TrimPrefix(dirInner, "/")))
+	}
+	dirOnDisk = filepath.Clean(dirOnDisk)
+	if !isSubpath(mountDir, dirOnDisk) {
+		return nil, "", errors.New("path is outside mounted ISO")
+	}
+
+	entries, err := os.ReadDir(dirOnDisk)
+	if err != nil {
+		return nil, "", err
+	}
+
+	items := make([]SuggestedPath, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if base != "" && !strings.Contains(strings.ToLower(name), strings.ToLower(base)) {
+			continue
+		}
+
+		entryInner := path.Join(dirInner, name)
+		if !strings.HasPrefix(entryInner, "/") {
+			entryInner = "/" + entryInner
+		}
+		item := SuggestedPath{
+			Path:  buildVirtualISOPath(isoPath, entryInner, entry.IsDir()),
+			IsDir: entry.IsDir(),
+		}
+		if !entry.IsDir() {
+			info, err := entry.Info()
+			if err != nil {
+				return nil, "", err
+			}
+			item.Size = info.Size()
+		}
+		items = append(items, item)
+		if limit > 0 && len(items) >= limit {
+			break
+		}
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Path < items[j].Path
+	})
+	return items, selectedRoot, nil
+}
+
+func listDir(dir, base string, limit int) ([]SuggestedPath, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
-	items := make([]string, 0, len(entries))
+	items := make([]SuggestedPath, 0, len(entries))
 	for _, entry := range entries {
 		name := entry.Name()
 		if base != "" && !strings.Contains(strings.ToLower(name), strings.ToLower(base)) {
 			continue
 		}
 		full := filepath.Join(dir, name)
-		if entry.IsDir() {
-			full = withDirSuffix(full)
+		item := SuggestedPath{
+			Path:  full,
+			IsDir: entry.IsDir(),
 		}
-		items = append(items, full)
+		if entry.IsDir() {
+			item.Path = withDirSuffix(full)
+		} else {
+			info, err := entry.Info()
+			if err != nil {
+				return nil, err
+			}
+			item.Size = info.Size()
+		}
+		items = append(items, item)
 		if limit > 0 && len(items) >= limit {
 			break
 		}
 	}
-	sort.Strings(items)
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Path < items[j].Path
+	})
 	return items, nil
+}
+
+func hasDirectorySuffix(value string) bool {
+	return strings.HasSuffix(value, string(filepath.Separator)) || strings.HasSuffix(value, "/") || strings.HasSuffix(value, "\\")
 }
 
 func isSubpath(root, path string) bool {

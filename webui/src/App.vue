@@ -16,6 +16,7 @@
                 :entries="filteredEntries"
                 @navigate-up="navigateUp"
                 @refresh="refreshBrowser"
+                @enter-entry="handleEntryEnter"
                 @open-entry="handleEntryDoubleClick"
             />
 
@@ -159,6 +160,7 @@ const {
     hasInput,
     navigateUp,
     refreshBrowser,
+    handleEntryEnter,
     handleEntryDoubleClick,
 } = pathBrowser;
 
