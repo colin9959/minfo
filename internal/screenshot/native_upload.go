@@ -1,0 +1,196 @@
+package screenshot
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+
+	"minfo/internal/config"
+)
+
+const nativePixhostAPIURL = "https://api.pixhost.to/images"
+
+var nativePixhostThumbHostPattern = regexp.MustCompile(`^t([0-9]+)\.pixhost\.to$`)
+
+type nativePixhostResponse struct {
+	ShowURL string `json:"show_url"`
+	ThURL   string `json:"th_url"`
+}
+
+func runNativeUploadWithLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int) (UploadResult, error) {
+	screenshotResult, err := runNativeScreenshotsWithLogs(ctx, inputPath, outputDir, variant, subtitleMode, count)
+	if err != nil {
+		return UploadResult{Logs: screenshotResult.Logs}, err
+	}
+
+	output, uploadLogs, err := uploadFilesToPixhost(ctx, screenshotResult.Files)
+	logs := strings.TrimSpace(strings.Join(filterNonEmptyStrings(screenshotResult.Logs, uploadLogs), "\n\n"))
+	if err != nil {
+		return UploadResult{Logs: logs}, err
+	}
+	return UploadResult{Output: output, Logs: logs}, nil
+}
+
+func uploadFilesToPixhost(ctx context.Context, files []string) (string, string, error) {
+	logLines := make([]string, 0)
+	images := nativeCollectUploadableImages(files)
+	if len(images) == 0 {
+		logLines = append(logLines, "警告: 未找到有效图片文件")
+		return "", strings.Join(logLines, "\n"), errors.New("no uploadable screenshots were found")
+	}
+
+	logLines = append(logLines, fmt.Sprintf("开始处理 %d 个文件...", len(images)))
+	client := &http.Client{}
+	apiURL := config.Getenv("PIXHOST_API_URL", nativePixhostAPIURL)
+
+	links := make([]string, 0, len(images))
+	successCount := 0
+	for _, imagePath := range images {
+		directURL, err := uploadSinglePixhostImage(ctx, client, apiURL, imagePath)
+		if err != nil {
+			logLines = append(logLines, fmt.Sprintf("上传失败: %s (%s)", filepath.Base(imagePath), err.Error()))
+			continue
+		}
+		successCount++
+		links = append(links, directURL)
+		logLines = append(logLines, fmt.Sprintf("已上传并校准域名: %s", filepath.Base(imagePath)))
+	}
+
+	logLines = append(logLines, "")
+	logLines = append(logLines, fmt.Sprintf("处理完成! 成功: %d/%d", successCount, len(images)))
+
+	if len(links) == 0 {
+		return "", strings.Join(logLines, "\n"), errors.New("pixhost upload completed but returned no links")
+	}
+	return strings.Join(extractDirectLinks(strings.Join(links, "\n")), "\n"), strings.Join(logLines, "\n"), nil
+}
+
+func nativeCollectUploadableImages(paths []string) []string {
+	candidates := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if !nativeIsUploadableImage(path) {
+			continue
+		}
+		candidates = append(candidates, path)
+	}
+	sort.Strings(candidates)
+	return candidates
+}
+
+func nativeIsUploadableImage(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	if info.Size() <= 0 || info.Size() > nativeOversizeBytes {
+		return false
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	header := make([]byte, 512)
+	n, err := io.ReadFull(file, header)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return false
+	}
+
+	contentType := http.DetectContentType(header[:n])
+	return strings.HasPrefix(contentType, "image/")
+}
+
+func uploadSinglePixhostImage(ctx context.Context, client *http.Client, apiURL, imagePath string) (string, error) {
+	file, err := os.Open(imagePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	part, err := writer.CreateFormFile("img", filepath.Base(imagePath))
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return "", err
+	}
+	if err := writer.WriteField("content_type", "0"); err != nil {
+		return "", err
+	}
+	if err := writer.WriteField("max_th_size", "420"); err != nil {
+		return "", err
+	}
+	if err := writer.Close(); err != nil {
+		return "", err
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, &body)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+
+	response, err := client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+
+	payloadBytes, err := io.ReadAll(response.Body)
+	if err != nil {
+		return "", err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", fmt.Errorf("pixhost returned HTTP %d", response.StatusCode)
+	}
+
+	var payload nativePixhostResponse
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(payload.ShowURL) == "" || strings.TrimSpace(payload.ThURL) == "" {
+		return "", errors.New("pixhost response is missing show_url or th_url")
+	}
+
+	return nativeNormalizePixhostDirectURL(payload.ThURL)
+}
+
+func nativeNormalizePixhostDirectURL(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", errors.New("pixhost direct URL is empty")
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return "", err
+	}
+
+	parsed.Path = strings.Replace(parsed.Path, "/thumbs/", "/images/", 1)
+	if matches := nativePixhostThumbHostPattern.FindStringSubmatch(strings.ToLower(parsed.Host)); len(matches) == 2 {
+		parsed.Host = "img" + matches[1] + ".pixhost.to"
+	}
+
+	result := parsed.String()
+	if !strings.HasPrefix(result, "http://") && !strings.HasPrefix(result, "https://") {
+		return "", errors.New("pixhost direct URL is invalid")
+	}
+	return result, nil
+}

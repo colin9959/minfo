@@ -2,6 +2,7 @@ package screenshot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -17,12 +18,12 @@ import (
 	"minfo/internal/system"
 )
 
-const screenshotScriptDir = "/usr/local/share/minfo/scripts"
-
 const (
 	defaultScreenshotCount = 4
 	minScreenshotCount     = 1
 	maxScreenshotCount     = 10
+
+	nativeDVDPacketDiscontinuityGap = 30.0
 )
 
 const (
@@ -93,43 +94,6 @@ func NormalizeCount(raw string) int {
 	}
 }
 
-func subtitleModeArgs(mode string) []string {
-	if mode == SubtitleModeOff {
-		return []string{"-nosub"}
-	}
-	return nil
-}
-
-func screenshotScriptName(variant string) string {
-	switch variant {
-	case VariantJPG:
-		return "screenshots_jpg.sh"
-	default:
-		return "screenshots.sh"
-	}
-}
-
-func resolveScript(envKey, fallbackName string) (string, error) {
-	if value := strings.TrimSpace(os.Getenv(envKey)); value != "" {
-		info, err := os.Stat(value)
-		if err != nil {
-			return "", fmt.Errorf("%s not found: %v", envKey, err)
-		}
-		if info.IsDir() {
-			return "", fmt.Errorf("%s must point to a file", envKey)
-		}
-		return value, nil
-	}
-
-	candidate := filepath.Join(screenshotScriptDir, fallbackName)
-	info, err := os.Stat(candidate)
-	if err == nil && !info.IsDir() {
-		return candidate, nil
-	}
-
-	return "", fmt.Errorf("%s not found in %s; rebuild the image or set %s to override", fallbackName, screenshotScriptDir, envKey)
-}
-
 func RunScript(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int) ([]string, error) {
 	result, err := RunScriptWithLogs(ctx, inputPath, outputDir, variant, subtitleMode, count)
 	if err != nil {
@@ -139,36 +103,7 @@ func RunScript(ctx context.Context, inputPath, outputDir, variant, subtitleMode 
 }
 
 func RunScriptWithLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int) (ScriptResult, error) {
-	scriptPath, err := resolveScript("SCREENSHOT_SCRIPT", screenshotScriptName(variant))
-	if err != nil {
-		return ScriptResult{}, err
-	}
-
-	sourcePath, cleanup, err := media.ResolveScreenshotSource(ctx, inputPath)
-	if err != nil {
-		return ScriptResult{}, err
-	}
-	defer cleanup()
-
-	timestamps, err := randomScreenshotTimestampsForSource(ctx, sourcePath, count)
-	if err != nil {
-		return ScriptResult{}, err
-	}
-
-	args := append([]string{scriptPath}, subtitleModeArgs(subtitleMode)...)
-	args = append(args, sourcePath, outputDir)
-	args = append(args, timestamps...)
-	stdout, stderr, err := system.RunCommand(ctx, "bash", args...)
-	logs := system.CombineCommandOutput(stdout, stderr)
-	if err != nil {
-		return ScriptResult{Logs: logs}, fmt.Errorf("screenshot generation failed: %s", system.BestErrorMessage(err, stderr, stdout))
-	}
-
-	files, err := listScreenshotFiles(outputDir)
-	if err != nil {
-		return ScriptResult{Logs: logs}, err
-	}
-	return ScriptResult{Files: files, Logs: logs}, nil
+	return runNativeScreenshotsWithLogs(ctx, inputPath, outputDir, variant, subtitleMode, count)
 }
 
 func RunUpload(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int) (string, error) {
@@ -180,35 +115,7 @@ func RunUpload(ctx context.Context, inputPath, outputDir, variant, subtitleMode 
 }
 
 func RunUploadWithLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int) (UploadResult, error) {
-	uploadScript, err := resolveScript("SCREENSHOT_UPLOAD_SCRIPT", "PixhostUpload.sh")
-	if err != nil {
-		return UploadResult{}, err
-	}
-
-	screenshotResult, err := RunScriptWithLogs(ctx, inputPath, outputDir, variant, subtitleMode, count)
-	if err != nil {
-		return UploadResult{Logs: screenshotResult.Logs}, err
-	}
-
-	stdout, stderr, err := system.RunCommand(ctx, "bash", uploadScript, outputDir)
-	uploadLogs := system.CombineCommandOutput(stdout, stderr)
-	logs := strings.TrimSpace(strings.Join(filterNonEmptyStrings(screenshotResult.Logs, uploadLogs), "\n\n"))
-	if err != nil {
-		return UploadResult{Logs: logs}, fmt.Errorf("screenshot upload failed: %s", system.BestErrorMessage(err, stderr, stdout))
-	}
-
-	links := extractDirectLinks(stdout)
-	if len(links) == 0 {
-		output := strings.TrimSpace(stdout)
-		if output == "" {
-			output = strings.TrimSpace(stderr)
-		}
-		if output == "" {
-			return UploadResult{Logs: logs}, errors.New("pixhost upload completed but returned no links")
-		}
-		return UploadResult{Output: output, Logs: logs}, nil
-	}
-	return UploadResult{Output: strings.Join(links, "\n"), Logs: logs}, nil
+	return runNativeUploadWithLogs(ctx, inputPath, outputDir, variant, subtitleMode, count)
 }
 
 func randomScreenshotTimestamps(ctx context.Context, inputPath string, count int) ([]string, error) {
@@ -220,7 +127,13 @@ func randomScreenshotTimestamps(ctx context.Context, inputPath string, count int
 	}
 	defer cleanup()
 
-	return randomScreenshotTimestampsForSource(ctx, sourcePath, count)
+	ffmpegSourcePath, _, sourceCleanup, err := prepareSourceForFFmpeg(sourcePath)
+	if err != nil {
+		return nil, err
+	}
+	defer sourceCleanup()
+
+	return randomScreenshotTimestampsForSource(ctx, ffmpegSourcePath, count)
 }
 
 func randomScreenshotTimestampsForSource(ctx context.Context, sourcePath string, count int) ([]string, error) {
@@ -245,6 +158,18 @@ func randomScreenshotTimestampsForSource(ctx context.Context, sourcePath string,
 }
 
 func probeMediaDuration(ctx context.Context, ffprobe, path string) (float64, error) {
+	if nativeIsFFconcatSource(path) {
+		if duration, err := probeFFconcatDuration(ctx, ffprobe, path); err == nil {
+			return duration, nil
+		}
+	}
+
+	if nativeIsDVDTitleVOB(path) {
+		if duration, err := probeDVDTitleVOBPacketDuration(ctx, ffprobe, path); err == nil {
+			return duration, nil
+		}
+	}
+
 	stdout, stderr, err := runFFprobeDuration(ctx, ffprobe, path, "format=duration")
 	if err != nil {
 		return 0, fmt.Errorf("ffprobe format duration probe failed: %s", system.BestErrorMessage(err, stderr, stdout))
@@ -265,6 +190,21 @@ func probeMediaDuration(ctx context.Context, ffprobe, path string) (float64, err
 		return duration, nil
 	}
 
+	if nativeIsFFconcatSource(path) {
+		duration, concatErr := probeFFconcatDuration(ctx, ffprobe, path)
+		if concatErr == nil {
+			return duration, nil
+		}
+		if duration, mediaErr := probeMediaInfoDuration(ctx, path); mediaErr == nil {
+			return duration, nil
+		}
+		return 0, fmt.Errorf("ffprobe returned unusable duration: format probe (%v); stream probe (%v); ffconcat fallback (%v)", parseErr, streamErr, concatErr)
+	}
+
+	if duration, mediaErr := probeMediaInfoDuration(ctx, path); mediaErr == nil {
+		return duration, nil
+	}
+
 	return 0, fmt.Errorf("ffprobe returned unusable duration: format probe (%v); stream probe (%v)", parseErr, streamErr)
 }
 
@@ -275,6 +215,130 @@ func runFFprobeDuration(ctx context.Context, ffprobe, path, entries string) (str
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		path,
 	)
+}
+
+func probeFFconcatDuration(ctx context.Context, ffprobe, path string) (float64, error) {
+	files, err := nativeReadFFconcatFiles(path)
+	if err != nil {
+		return 0, err
+	}
+
+	total := 0.0
+	for _, file := range files {
+		duration, err := probeMediaDuration(ctx, ffprobe, file)
+		if err != nil {
+			return 0, fmt.Errorf("probe %s: %w", filepath.Base(file), err)
+		}
+		total += duration
+	}
+	if total <= 0 {
+		return 0, errors.New("ffconcat duration sum is not positive")
+	}
+	return total, nil
+}
+
+func probeDVDTitleVOBPacketDuration(ctx context.Context, ffprobe, path string) (float64, error) {
+	startOffset, err := probeVideoStartOffset(ctx, ffprobe, path)
+	if err != nil {
+		return 0, err
+	}
+
+	stdout, stderr, err := system.RunCommand(ctx, ffprobe,
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_packets",
+		"-show_entries", "packet=pts_time,duration_time",
+		"-of", "json",
+		path,
+	)
+	if err != nil {
+		return 0, fmt.Errorf(system.BestErrorMessage(err, stderr, stdout))
+	}
+	if strings.TrimSpace(stdout) == "" {
+		return 0, errors.New("ffprobe returned empty packet payload")
+	}
+
+	var payload nativeFFprobePacketsPayload
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		return 0, err
+	}
+
+	duration, ok := nativeAccumulateDVDPacketDuration(payload.Packets, startOffset, nativeDVDPacketDiscontinuityGap)
+	if !ok || duration <= 0 {
+		return 0, errors.New("ffprobe returned unusable packet duration")
+	}
+	return duration, nil
+}
+
+func probeVideoStartOffset(ctx context.Context, ffprobe, path string) (float64, error) {
+	stdout, stderr, err := system.RunCommand(ctx, ffprobe,
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=start_time",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		path,
+	)
+	if err == nil {
+		if value, ok := nativeFirstFloatLine(stdout); ok {
+			return value, nil
+		}
+	}
+
+	stdout, stderr, err = system.RunCommand(ctx, ffprobe,
+		"-v", "error",
+		"-show_entries", "format=start_time",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		path,
+	)
+	if err == nil {
+		if value, ok := nativeFirstFloatLine(stdout); ok {
+			return value, nil
+		}
+	}
+	if err != nil {
+		return 0, fmt.Errorf(system.BestErrorMessage(err, stderr, stdout))
+	}
+	return 0, errors.New("ffprobe returned empty start_time")
+}
+
+func probeMediaInfoDuration(ctx context.Context, path string) (float64, error) {
+	mediainfo, err := system.ResolveBin("MEDIAINFO_BIN", "mediainfo")
+	if err != nil {
+		return 0, err
+	}
+
+	stdout, stderr, err := system.RunCommand(ctx, mediainfo, "--Output=General;%Duration%", path)
+	if err != nil {
+		return 0, fmt.Errorf("mediainfo duration probe failed: %s", system.BestErrorMessage(err, stderr, stdout))
+	}
+	return parseMediaInfoDurationOutput(stdout)
+}
+
+func parseMediaInfoDurationOutput(output string) (float64, error) {
+	values := strings.FieldsFunc(output, func(r rune) bool {
+		return r == '\n' || r == '\r' || r == ';'
+	})
+	invalid := make([]string, 0, len(values))
+
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+
+		milliseconds, err := strconv.ParseFloat(value, 64)
+		if err != nil || math.IsNaN(milliseconds) || math.IsInf(milliseconds, 0) || milliseconds <= 0 {
+			invalid = append(invalid, value)
+			continue
+		}
+
+		return milliseconds / 1000.0, nil
+	}
+
+	if len(invalid) == 0 {
+		return 0, errors.New("mediainfo returned empty duration")
+	}
+	return 0, fmt.Errorf("mediainfo returned invalid duration values: %s", strings.Join(invalid, ", "))
 }
 
 func parseDurationOutput(output string) (float64, error) {
@@ -308,6 +372,68 @@ func parseDurationOutput(output string) (float64, error) {
 		return 0, errors.New("ffprobe returned empty duration")
 	}
 	return 0, fmt.Errorf("ffprobe returned invalid duration values: %s", strings.Join(invalid, ", "))
+}
+
+func nativeAccumulateDVDPacketDuration(packets []nativeFFprobePacket, startOffset, discontinuityGap float64) (float64, bool) {
+	if discontinuityGap <= 0 {
+		discontinuityGap = nativeDVDPacketDiscontinuityGap
+	}
+
+	clusterStart := 0.0
+	clusterEnd := 0.0
+	total := 0.0
+	started := false
+
+	for _, packet := range packets {
+		pts, ok := nativeParseFloatString(packet.PTSTime)
+		if !ok {
+			continue
+		}
+		durationValue, ok := nativeParseFloatString(packet.DurationTime)
+		if !ok || durationValue < 0 {
+			durationValue = 0
+		}
+
+		packetStart := pts
+		packetEnd := pts + durationValue
+		if packetEnd < packetStart {
+			packetEnd = packetStart
+		}
+
+		if !started {
+			clusterStart = math.Min(startOffset, packetStart)
+			clusterEnd = packetEnd
+			started = true
+			continue
+		}
+
+		if packetStart > clusterEnd+discontinuityGap || packetEnd < clusterStart-discontinuityGap || packetStart < clusterStart-discontinuityGap {
+			if clusterEnd > clusterStart {
+				total += clusterEnd - clusterStart
+			}
+			clusterStart = packetStart
+			clusterEnd = packetEnd
+			continue
+		}
+
+		if packetStart < clusterStart {
+			clusterStart = packetStart
+		}
+		if packetEnd > clusterEnd {
+			clusterEnd = packetEnd
+		}
+	}
+
+	if !started {
+		return 0, false
+	}
+	if clusterEnd > clusterStart {
+		total += clusterEnd - clusterStart
+	}
+	if total <= 0 || math.IsNaN(total) || math.IsInf(total, 0) {
+		return 0, false
+	}
+	return total, true
 }
 
 func buildRandomTimestampSeconds(duration float64, count int) []int {

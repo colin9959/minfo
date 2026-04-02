@@ -31,7 +31,10 @@ func ResolveScreenshotSource(ctx context.Context, input string) (string, func(),
 	}
 	if !info.IsDir() {
 		if isISOFile(input) {
-			return resolveM2TSFromMountedISO(ctx, input)
+			return resolveVideoFromMountedISO(ctx, input)
+		}
+		if sourcePath, ok := resolveDVDFileScreenshotSource(input); ok {
+			return sourcePath, func() {}, nil
 		}
 		return input, func() {}, nil
 	}
@@ -46,13 +49,13 @@ func ResolveScreenshotSource(ctx context.Context, input string) (string, func(),
 
 	isoPath, err := findISOInDir(input)
 	if err == nil {
-		return resolveM2TSFromMountedISO(ctx, isoPath)
+		return resolveVideoFromMountedISO(ctx, isoPath)
 	}
 	if !errors.Is(err, errNoISO) {
 		return "", func() {}, err
 	}
 
-	videoPath, err := findVideoFile(input)
+	videoPath, err := resolveScreenshotSourceFromRoot(input)
 	if err != nil {
 		return "", func() {}, err
 	}
@@ -68,11 +71,59 @@ func ResolveMediaInfoCandidates(ctx context.Context, input string, limit int) ([
 		return []string{input}, func() {}, nil
 	}
 
+	if dvdRoot, ok := resolveDVDVideoRoot(input); ok {
+		target, err := resolveDVDMediaInfoFileFromRoot(dvdRoot)
+		if err != nil {
+			return nil, func() {}, err
+		}
+		return []string{target}, func() {}, nil
+	}
+
+	isoPath, err := findISOInDir(input)
+	if err == nil {
+		return []string{isoPath}, func() {}, nil
+	}
+	if !errors.Is(err, errNoISO) {
+		return nil, func() {}, err
+	}
+
 	candidates, err := findVideoCandidates(input, limit)
 	if err != nil {
 		return nil, func() {}, err
 	}
 	return candidates, func() {}, nil
+}
+
+func ResolveDVDMediaInfoSource(ctx context.Context, input string) (string, func(), error) {
+	info, err := os.Stat(input)
+	if err != nil {
+		return "", func() {}, err
+	}
+
+	if !info.IsDir() {
+		if isISOFile(input) {
+			return input, func() {}, nil
+		}
+		return input, func() {}, nil
+	}
+
+	if dvdRoot, ok := resolveDVDVideoRoot(input); ok {
+		target, err := resolveDVDMediaInfoFileFromRoot(dvdRoot)
+		if err != nil {
+			return "", func() {}, err
+		}
+		return target, func() {}, nil
+	}
+
+	isoPath, err := findISOInDir(input)
+	if err == nil {
+		return isoPath, func() {}, nil
+	}
+	if !errors.Is(err, errNoISO) {
+		return "", func() {}, err
+	}
+
+	return "", func() {}, errors.New("path does not contain DVD VIDEO_TS content")
 }
 
 func ResolveBDInfoSource(ctx context.Context, input string) (string, func(), error) {
@@ -126,6 +177,55 @@ func resolveBDMVRoot(path string) (string, bool) {
 	if info, err := os.Stat(bdmv); err == nil && info.IsDir() {
 		return bdmv, true
 	}
+	return "", false
+}
+
+func resolveDVDVideoRoot(path string) (string, bool) {
+	base := filepath.Base(path)
+	if strings.EqualFold(base, "VIDEO_TS") {
+		return path, true
+	}
+	videoTS := filepath.Join(path, "VIDEO_TS")
+	if info, err := os.Stat(videoTS); err == nil && info.IsDir() {
+		return videoTS, true
+	}
+	return "", false
+}
+
+func resolveDVDFileScreenshotSource(path string) (string, bool) {
+	cleaned := strings.TrimSpace(path)
+	if cleaned == "" {
+		return "", false
+	}
+
+	info, err := os.Stat(cleaned)
+	if err != nil || info.IsDir() {
+		return "", false
+	}
+
+	base := strings.ToUpper(filepath.Base(cleaned))
+	switch strings.ToUpper(filepath.Ext(cleaned)) {
+	case ".VOB":
+		if strings.EqualFold(base, "VIDEO_TS.VOB") {
+			if sourcePath, err := resolveScreenshotSourceFromRoot(filepath.Dir(cleaned)); err == nil {
+				return sourcePath, true
+			}
+		}
+		if isDVDTitleVOBName(base) {
+			return cleaned, true
+		}
+	case ".IFO", ".BUP":
+		if strings.EqualFold(base, "VIDEO_TS.IFO") || strings.EqualFold(base, "VIDEO_TS.BUP") {
+			if sourcePath, err := resolveScreenshotSourceFromRoot(filepath.Dir(cleaned)); err == nil {
+				return sourcePath, true
+			}
+			return "", false
+		}
+		if controlVOB := dvdTitleVOBPathFromControlFile(cleaned); controlVOB != "" {
+			return controlVOB, true
+		}
+	}
+
 	return "", false
 }
 
@@ -192,22 +292,17 @@ func findLargestM2TS(root string) (string, error) {
 	return largestPath, nil
 }
 
-func resolveM2TSFromMountedISO(ctx context.Context, isoPath string) (string, func(), error) {
+func resolveVideoFromMountedISO(ctx context.Context, isoPath string) (string, func(), error) {
 	mountDir, cleanup, err := mountISO(ctx, isoPath)
 	if err != nil {
 		return "", func() {}, err
 	}
-	bdmvRoot, ok := resolveBDMVRoot(mountDir)
-	if !ok {
-		cleanup()
-		return "", func() {}, errors.New("BDMV folder not found in ISO")
-	}
-	m2ts, err := findLargestM2TS(bdmvRoot)
+	videoPath, err := resolveScreenshotSourceFromRoot(mountDir)
 	if err != nil {
 		cleanup()
 		return "", func() {}, err
 	}
-	return m2ts, cleanup, nil
+	return videoPath, cleanup, nil
 }
 
 func resolveBDInfoFromMountedISO(ctx context.Context, isoPath string) (string, func(), error) {
@@ -300,6 +395,176 @@ func findVideoCandidates(root string, limit int) ([]string, error) {
 		results = append(results, items[index].path)
 	}
 	return results, nil
+}
+
+func resolveScreenshotSourceFromRoot(root string) (string, error) {
+	if bdmvRoot, ok := resolveBDMVRoot(root); ok {
+		return findLargestM2TS(bdmvRoot)
+	}
+	if dvdRoot, ok := resolveDVDVideoRoot(root); ok {
+		if titleVOB, err := findMainDVDTitleSetFirstVOB(dvdRoot); err == nil {
+			return titleVOB, nil
+		}
+		return findVideoFile(dvdRoot)
+	}
+	return findVideoFile(root)
+}
+
+func resolveDVDMediaInfoFileFromRoot(root string) (string, error) {
+	dvdRoot, ok := resolveDVDVideoRoot(root)
+	if !ok {
+		return "", errors.New("VIDEO_TS folder not found")
+	}
+
+	titleVOB, err := findMainDVDTitleSetFirstVOB(dvdRoot)
+	if err == nil {
+		ifoPath := dvdControlIFOPathFromTitleVOB(titleVOB)
+		if ifoPath != "" {
+			if info, statErr := os.Stat(ifoPath); statErr == nil && !info.IsDir() {
+				return ifoPath, nil
+			}
+		}
+		return titleVOB, nil
+	}
+
+	videoTSIFO := filepath.Join(dvdRoot, "VIDEO_TS.IFO")
+	if info, statErr := os.Stat(videoTSIFO); statErr == nil && !info.IsDir() {
+		return videoTSIFO, nil
+	}
+	return "", err
+}
+
+func findMainDVDTitleSetFirstVOB(videoTSDir string) (string, error) {
+	entries, err := os.ReadDir(videoTSDir)
+	if err != nil {
+		return "", err
+	}
+
+	type dvdTitleVOB struct {
+		titleSet int
+		part     int
+		size     int64
+		path     string
+	}
+
+	items := make([]dvdTitleVOB, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !isDVDTitleVOBName(entry.Name()) {
+			continue
+		}
+		titleSet, part, ok := parseDVDTitleVOBName(entry.Name())
+		if !ok {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return "", err
+		}
+		items = append(items, dvdTitleVOB{
+			titleSet: titleSet,
+			part:     part,
+			size:     info.Size(),
+			path:     filepath.Join(videoTSDir, entry.Name()),
+		})
+	}
+	if len(items) == 0 {
+		return "", errors.New("no DVD title VOB files found under VIDEO_TS")
+	}
+
+	titleSetSizes := make(map[int]int64, len(items))
+	for _, item := range items {
+		titleSetSizes[item.titleSet] += item.size
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		leftTotal := titleSetSizes[items[i].titleSet]
+		rightTotal := titleSetSizes[items[j].titleSet]
+		if leftTotal != rightTotal {
+			return leftTotal > rightTotal
+		}
+		if items[i].titleSet != items[j].titleSet {
+			return items[i].titleSet < items[j].titleSet
+		}
+		if items[i].part != items[j].part {
+			return items[i].part < items[j].part
+		}
+		return items[i].path < items[j].path
+	})
+
+	mainTitleSet := items[0].titleSet
+	best := items[0]
+	for _, item := range items[1:] {
+		if item.titleSet != mainTitleSet {
+			break
+		}
+		if item.part < best.part || (item.part == best.part && item.path < best.path) {
+			best = item
+		}
+	}
+	return best.path, nil
+}
+
+func dvdControlIFOPathFromTitleVOB(path string) string {
+	base := filepath.Base(path)
+	if len(base) < len("VTS_00_1.VOB") {
+		return ""
+	}
+	if !isDVDTitleVOBName(base) {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(path), base[:7]+"0.IFO")
+}
+
+func dvdTitleVOBPathFromControlFile(path string) string {
+	base := strings.ToUpper(filepath.Base(path))
+	if len(base) < len("VTS_00_0.IFO") {
+		return ""
+	}
+	if !isDVDTitleControlFileName(base) {
+		return ""
+	}
+
+	vobPath := filepath.Join(filepath.Dir(path), base[:7]+"1.VOB")
+	info, err := os.Stat(vobPath)
+	if err != nil || info.IsDir() {
+		return ""
+	}
+	return vobPath
+}
+
+func isDVDTitleControlFileName(name string) bool {
+	name = strings.ToUpper(strings.TrimSpace(name))
+	return len(name) == len("VTS_00_0.IFO") &&
+		strings.HasPrefix(name, "VTS_") &&
+		name[6] == '_' &&
+		name[7] == '0' &&
+		name[8] == '.' &&
+		name[4] >= '0' && name[4] <= '9' &&
+		name[5] >= '0' && name[5] <= '9' &&
+		(strings.HasSuffix(name, ".IFO") || strings.HasSuffix(name, ".BUP"))
+}
+
+func isDVDTitleVOBName(name string) bool {
+	name = strings.ToUpper(strings.TrimSpace(name))
+	return len(name) == len("VTS_00_1.VOB") &&
+		strings.HasPrefix(name, "VTS_") &&
+		name[6] == '_' &&
+		name[8] == '.' &&
+		name[7] >= '1' && name[7] <= '9' &&
+		name[4] >= '0' && name[4] <= '9' &&
+		name[5] >= '0' && name[5] <= '9' &&
+		strings.HasSuffix(name, ".VOB")
+}
+
+func parseDVDTitleVOBName(name string) (int, int, bool) {
+	name = strings.ToUpper(strings.TrimSpace(name))
+	if !isDVDTitleVOBName(name) {
+		return 0, 0, false
+	}
+
+	titleSet := int(name[4]-'0')*10 + int(name[5]-'0')
+	part := int(name[7] - '0')
+	return titleSet, part, true
 }
 
 func findLargestVideoFile(root string) (string, error) {

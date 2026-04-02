@@ -160,7 +160,7 @@ static void probe_result_set_clip(PROBE_RESULT *result, const char *clip_id, uin
         return;
     }
     memset(result->clip_id, 0, sizeof(result->clip_id));
-    strncpy(result->clip_id, clip_id, 5);
+    memcpy(result->clip_id, clip_id, 5);
     result->clip_ref = clip_ref;
 }
 
@@ -705,18 +705,12 @@ static void print_probe_result_json(const char *disc_path, const PROBE_RESULT *r
 {
     size_t i;
 
+    (void)disc_path;
     printf("{");
-    printf("\"disc_path\":");
-    json_print_string(disc_path);
-    printf(",\"playlist\":%u", result ? result->playlist : 0);
-    printf(",\"source\":");
+    printf("\"source\":");
     json_print_string(result && result->source[0] ? result->source : "unknown");
-    printf(",\"title_source\":");
-    json_print_string(result && result->source[0] ? result->source : "unknown");
-    printf(",\"title_idx\":0");
     printf(",\"clip\":{");
-    printf("\"clip_ref\":%u", result ? result->clip_ref : 0);
-    printf(",\"clip_id\":");
+    printf("\"clip_id\":");
     json_print_string(result && result->clip_id[0] ? result->clip_id : "");
     printf(",\"pg_stream_count\":%zu", result ? result->pg_stream_count : 0u);
     printf(",\"pg_streams\":[");
