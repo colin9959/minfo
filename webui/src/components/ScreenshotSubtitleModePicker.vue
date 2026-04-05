@@ -16,7 +16,7 @@
             :disabled="busy"
             @click="$emit('update:modelValue', 'off')"
         >
-            纯净截图
+            无字幕
         </button>
     </div>
 </template>
