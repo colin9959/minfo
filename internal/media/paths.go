@@ -1,3 +1,5 @@
+// Package media 提供媒体根目录解析和路径联想逻辑。
+
 package media
 
 import (
@@ -10,12 +12,14 @@ import (
 	"strings"
 )
 
+// SuggestedPath 表示路径联想结果中的一个候选项。
 type SuggestedPath struct {
 	Path  string
 	IsDir bool
 	Size  int64
 }
 
+// SuggestPaths 根据前缀在媒体根目录或 ISO 虚拟目录中生成路径联想结果。
 func SuggestPaths(roots []string, prefix string, limit int) ([]SuggestedPath, string, error) {
 	if len(roots) == 0 {
 		return nil, "", errors.New("no MEDIA_ROOT configured")
@@ -76,6 +80,7 @@ func SuggestPaths(roots []string, prefix string, limit int) ([]SuggestedPath, st
 	return items, selectedRoot, err
 }
 
+// ResolveRoots 过滤无效或重复的媒体根目录，并返回排序后的可用列表。
 func ResolveRoots(roots []string) ([]string, error) {
 	resolved := make([]string, 0, len(roots))
 	seen := make(map[string]struct{}, len(roots))
@@ -104,6 +109,7 @@ func ResolveRoots(roots []string) ([]string, error) {
 	return resolved, nil
 }
 
+// findContainingRoot 返回包含给定绝对路径的媒体根目录。
 func findContainingRoot(roots []string, path string) (string, bool) {
 	for _, root := range roots {
 		if isSubpath(root, path) {
@@ -113,6 +119,7 @@ func findContainingRoot(roots []string, path string) (string, bool) {
 	return "", false
 }
 
+// withDirSuffix 为目录路径补上平台相关的尾部分隔符。
 func withDirSuffix(path string) string {
 	if strings.HasSuffix(path, string(filepath.Separator)) {
 		return path
@@ -120,6 +127,7 @@ func withDirSuffix(path string) string {
 	return path + string(filepath.Separator)
 }
 
+// suggestVirtualISOPaths 在挂载后的 ISO 目录中执行路径联想，并把结果重新映射回虚拟 ISO 路径。
 func suggestVirtualISOPaths(roots []string, prefix string, limit int) ([]SuggestedPath, string, error) {
 	isoPath, inner, ok := parseVirtualISOPath(prefix)
 	if !ok {
@@ -198,6 +206,7 @@ func suggestVirtualISOPaths(roots []string, prefix string, limit int) ([]Suggest
 	return items, selectedRoot, nil
 }
 
+// listDir 会列出目录，并按当前规则返回排序后的结果列表。
 func listDir(dir, base string, limit int) ([]SuggestedPath, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -234,10 +243,12 @@ func listDir(dir, base string, limit int) ([]SuggestedPath, error) {
 	return items, nil
 }
 
+// hasDirectorySuffix 会判断DirectorySuffix是否已经存在或具备。
 func hasDirectorySuffix(value string) bool {
 	return strings.HasSuffix(value, string(filepath.Separator)) || strings.HasSuffix(value, "/") || strings.HasSuffix(value, "\\")
 }
 
+// isSubpath 会判断Subpath是否满足当前条件。
 func isSubpath(root, path string) bool {
 	root = filepath.Clean(root)
 	path = filepath.Clean(path)

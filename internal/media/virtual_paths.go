@@ -1,3 +1,5 @@
+// Package media 处理虚拟 ISO 路径的解析与构造。
+
 package media
 
 import (
@@ -11,6 +13,7 @@ import (
 
 const virtualISOPrefix = "ISO:"
 
+// ResolveInputPath 解析用户输入的媒体路径；它支持普通路径和 ISO 虚拟路径。
 func ResolveInputPath(ctx context.Context, input string) (string, func(), error) {
 	cleaned := strings.TrimSpace(strings.Trim(input, "\""))
 	if cleaned == "" {
@@ -28,11 +31,13 @@ func ResolveInputPath(ctx context.Context, input string) (string, func(), error)
 	return cleaned, func() {}, nil
 }
 
+// isVirtualISOPath 会判断虚拟ISO路径是否满足当前条件。
 func isVirtualISOPath(input string) bool {
 	_, _, ok := parseVirtualISOPath(input)
 	return ok
 }
 
+// parseVirtualISOPath 解析形如 ISO:/path/to.iso!/BDMV 的虚拟 ISO 路径。
 func parseVirtualISOPath(input string) (string, string, bool) {
 	if !strings.HasPrefix(input, virtualISOPrefix) {
 		return "", "", false
@@ -79,6 +84,7 @@ func parseVirtualISOPath(input string) (string, string, bool) {
 	return isoPath, inner, true
 }
 
+// buildVirtualISOPath 根据 ISO 文件路径和内部路径重新拼出虚拟 ISO 路径。
 func buildVirtualISOPath(isoPath, inner string, isDir bool) string {
 	cleanISO := filepath.Clean(isoPath)
 	cleanInner := strings.ReplaceAll(strings.TrimSpace(inner), "\\", "/")
@@ -103,6 +109,7 @@ func buildVirtualISOPath(isoPath, inner string, isDir bool) string {
 	return result
 }
 
+// resolveVirtualISOPath 挂载 ISO 并把虚拟路径解析成容器内可访问的实际路径。
 func resolveVirtualISOPath(ctx context.Context, input string) (string, func(), error) {
 	isoPath, inner, ok := parseVirtualISOPath(input)
 	if !ok {

@@ -1,3 +1,5 @@
+// Package media 提供媒体根目录和挂载点探测逻辑。
+
 package media
 
 import (
@@ -9,6 +11,7 @@ import (
 	"minfo/internal/config"
 )
 
+// MediaRoots 返回当前服务用于路径浏览的根目录列表；优先使用自动探测到的挂载点。
 func MediaRoots() []string {
 	if roots := detectMountedRoots(); len(roots) > 0 {
 		return roots
@@ -16,6 +19,7 @@ func MediaRoots() []string {
 	return []string{config.DefaultRoot}
 }
 
+// detectMountedRoots 从 /proc/self/mountinfo 中筛出可作为媒体根目录的顶层挂载点。
 func detectMountedRoots() []string {
 	content, err := os.ReadFile("/proc/self/mountinfo")
 	if err != nil {
@@ -105,6 +109,7 @@ func detectMountedRoots() []string {
 	return roots
 }
 
+// isTopLevelMount 会判断TopLevel挂载是否满足当前条件。
 func isTopLevelMount(path string) bool {
 	trimmed := strings.Trim(path, "/")
 	if trimmed == "" {
@@ -113,6 +118,7 @@ func isTopLevelMount(path string) bool {
 	return !strings.Contains(trimmed, "/")
 }
 
+// decodeMountInfoField 解码 mountinfo 中的八进制转义字段。
 func decodeMountInfoField(value string) string {
 	if value == "" || !strings.Contains(value, "\\") {
 		return value
@@ -132,6 +138,7 @@ func decodeMountInfoField(value string) string {
 	return builder.String()
 }
 
+// isOctal 会判断Octal是否满足当前条件。
 func isOctal(ch byte) bool {
 	return ch >= '0' && ch <= '7'
 }

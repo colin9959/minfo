@@ -1,3 +1,5 @@
+// Package system 提供外部命令执行和实时输出转发能力。
+
 package system
 
 import (
@@ -13,6 +15,7 @@ import (
 	"minfo/internal/config"
 )
 
+// ResolveBin 会按环境变量和回退值解析可执行文件路径，并校验它当前可用。
 func ResolveBin(envKey, fallback string) (string, error) {
 	bin := config.Getenv(envKey, fallback)
 	if _, err := exec.LookPath(bin); err != nil {
@@ -21,24 +24,30 @@ func ResolveBin(envKey, fallback string) (string, error) {
 	return bin, nil
 }
 
+// RunCommand 会在默认工作目录中执行外部命令，并返回完整 stdout、stderr 和错误状态。
 func RunCommand(ctx context.Context, bin string, args ...string) (string, string, error) {
 	return runCommand(ctx, "", bin, args...)
 }
 
+// RunCommandInDir 会在指定目录中执行外部命令，并返回完整 stdout、stderr 和错误状态。
 func RunCommandInDir(ctx context.Context, dir, bin string, args ...string) (string, string, error) {
 	return runCommand(ctx, dir, bin, args...)
 }
 
+// OutputLineHandler 处理实时命令输出的单行内容。
 type OutputLineHandler func(stream, line string)
 
+// RunCommandLive 会执行外部命令，并把输出按行实时转发给调用方。
 func RunCommandLive(ctx context.Context, bin string, onLine OutputLineHandler, args ...string) (string, string, error) {
 	return runCommandLive(ctx, "", bin, onLine, args...)
 }
 
+// RunCommandInDirLive 会在指定目录中执行外部命令，并把输出按行实时转发给调用方。
 func RunCommandInDirLive(ctx context.Context, dir, bin string, onLine OutputLineHandler, args ...string) (string, string, error) {
 	return runCommandLive(ctx, dir, bin, onLine, args...)
 }
 
+// runCommand 在指定目录启动命令，并完整收集 stdout 和 stderr。
 func runCommand(ctx context.Context, dir, bin string, args ...string) (string, string, error) {
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = dir
@@ -84,6 +93,7 @@ func runCommand(ctx context.Context, dir, bin string, args ...string) (string, s
 	return string(stdoutData), string(stderrData), waitErr
 }
 
+// runCommandLive 在命令运行过程中按行转发输出，同时保留完整 stdout 和 stderr。
 func runCommandLive(ctx context.Context, dir, bin string, onLine OutputLineHandler, args ...string) (string, string, error) {
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = dir
@@ -141,6 +151,7 @@ type lineRelayWriter struct {
 	buffer bytes.Buffer
 }
 
+// newLineRelayWriter 创建一个按行拆分并转发输出的 Writer。
 func newLineRelayWriter(stream string, onLine OutputLineHandler) *lineRelayWriter {
 	return &lineRelayWriter{
 		stream: stream,
@@ -148,6 +159,7 @@ func newLineRelayWriter(stream string, onLine OutputLineHandler) *lineRelayWrite
 	}
 }
 
+// Write 把命令输出写入缓冲区，并在读到完整行时立即回调。
 func (w *lineRelayWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -159,6 +171,7 @@ func (w *lineRelayWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// Flush 会刷新缓冲内容，确保待发送数据及时写出。
 func (w *lineRelayWriter) Flush() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -170,6 +183,7 @@ func (w *lineRelayWriter) Flush() {
 	w.buffer.Reset()
 }
 
+// flushCompleteLinesLocked 假定调用方已持锁，并把缓冲区中完整的行逐一回调出去。
 func (w *lineRelayWriter) flushCompleteLinesLocked() {
 	data := w.buffer.Bytes()
 	start := 0
@@ -187,6 +201,7 @@ func (w *lineRelayWriter) flushCompleteLinesLocked() {
 	w.buffer.Next(start)
 }
 
+// BestErrorMessage 组合 err、stderr 和 stdout，生成更适合展示给用户的错误文本。
 func BestErrorMessage(err error, stderr, stdout string) string {
 	msg := strings.TrimSpace(stderr)
 	if msg == "" {
@@ -198,6 +213,7 @@ func BestErrorMessage(err error, stderr, stdout string) string {
 	return msg
 }
 
+// CombineCommandOutput 合并 stdout 和 stderr，并保留两者的可读分隔。
 func CombineCommandOutput(stdout, stderr string) string {
 	output := strings.TrimSpace(stdout)
 	if strings.TrimSpace(stderr) != "" {

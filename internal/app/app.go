@@ -1,3 +1,5 @@
+// Package app 负责组装 HTTP 服务、嵌入式资源和运行时配置。
+
 package app
 
 import (
@@ -12,6 +14,7 @@ import (
 	"minfo/internal/media"
 )
 
+// NewServer 会根据当前配置创建 HTTP Server，并在启动前预加载截图流程依赖的 UDF 模块。
 func NewServer(staticFS fs.FS) (*http.Server, error) {
 	port := config.Getenv("PORT", config.DefaultPort)
 

@@ -1,3 +1,5 @@
+// Package media 负责把输入路径解析成截图、BDInfo 和 MediaInfo 所需的实际源。
+
 package media
 
 import (
@@ -17,6 +19,7 @@ var errNoVideo = errors.New("no video files found")
 
 const mediaInfoCandidateLimit = 5
 
+// MediaInfoCandidateLimit 限制 MediaInfo 自动重试时最多返回的候选媒体数量。
 const MediaInfoCandidateLimit = mediaInfoCandidateLimit
 
 type videoCandidate struct {
@@ -24,6 +27,7 @@ type videoCandidate struct {
 	size int64
 }
 
+// ResolveScreenshotSource 把输入路径解析成可直接交给截图流程的实际视频文件，并返回可能需要的清理函数。
 func ResolveScreenshotSource(ctx context.Context, input string) (string, func(), error) {
 	info, err := os.Stat(input)
 	if err != nil {
@@ -62,6 +66,7 @@ func ResolveScreenshotSource(ctx context.Context, input string) (string, func(),
 	return videoPath, func() {}, nil
 }
 
+// ResolveMediaInfoCandidates 根据输入路径返回适合 MediaInfo 重试的候选文件列表。
 func ResolveMediaInfoCandidates(ctx context.Context, input string, limit int) ([]string, func(), error) {
 	info, err := os.Stat(input)
 	if err != nil {
@@ -94,6 +99,7 @@ func ResolveMediaInfoCandidates(ctx context.Context, input string, limit int) ([
 	return candidates, func() {}, nil
 }
 
+// ResolveDVDMediaInfoSource 把输入路径解析成 DVD MediaInfo 应该探测的文件或 ISO 路径。
 func ResolveDVDMediaInfoSource(ctx context.Context, input string) (string, func(), error) {
 	info, err := os.Stat(input)
 	if err != nil {
@@ -126,6 +132,7 @@ func ResolveDVDMediaInfoSource(ctx context.Context, input string) (string, func(
 	return "", func() {}, errors.New("path does not contain DVD VIDEO_TS content")
 }
 
+// ResolveBDInfoSource 把输入路径解析成 BDInfo 可以扫描的目录，并在需要时挂载 ISO。
 func ResolveBDInfoSource(ctx context.Context, input string) (string, func(), error) {
 	info, err := os.Stat(input)
 	if err != nil {
@@ -153,6 +160,7 @@ func ResolveBDInfoSource(ctx context.Context, input string) (string, func(), err
 	return "", func() {}, errors.New("path does not contain BDMV or BDISO content")
 }
 
+// resolveBDInfoRoot 返回路径对应的蓝光根目录；它接受光盘根目录、BDMV 目录和 STREAM 目录。
 func resolveBDInfoRoot(path string) (string, bool) {
 	base := filepath.Base(path)
 	if strings.EqualFold(base, "BDMV") {
@@ -168,6 +176,7 @@ func resolveBDInfoRoot(path string) (string, bool) {
 	return "", false
 }
 
+// resolveBDMVRoot 返回可用于查找 M2TS 的 BDMV 目录。
 func resolveBDMVRoot(path string) (string, bool) {
 	base := filepath.Base(path)
 	if strings.EqualFold(base, "BDMV") || strings.EqualFold(base, "STREAM") {
@@ -180,6 +189,7 @@ func resolveBDMVRoot(path string) (string, bool) {
 	return "", false
 }
 
+// resolveDVDVideoRoot 返回路径对应的 VIDEO_TS 目录。
 func resolveDVDVideoRoot(path string) (string, bool) {
 	base := filepath.Base(path)
 	if strings.EqualFold(base, "VIDEO_TS") {
@@ -192,6 +202,7 @@ func resolveDVDVideoRoot(path string) (string, bool) {
 	return "", false
 }
 
+// resolveDVDFileScreenshotSource 把单个 DVD 控制文件或 VOB 文件转换成截图流程应该使用的视频源。
 func resolveDVDFileScreenshotSource(path string) (string, bool) {
 	cleaned := strings.TrimSpace(path)
 	if cleaned == "" {
@@ -229,10 +240,12 @@ func resolveDVDFileScreenshotSource(path string) (string, bool) {
 	return "", false
 }
 
+// isISOFile 判断路径是否以 .iso 结尾。
 func isISOFile(path string) bool {
 	return strings.EqualFold(filepath.Ext(path), ".iso")
 }
 
+// findISOInDir 在目录树中查找第一个 ISO 文件。
 func findISOInDir(root string) (string, error) {
 	var isoPath string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -257,6 +270,7 @@ func findISOInDir(root string) (string, error) {
 	return isoPath, nil
 }
 
+// findLargestM2TS 在 BDMV 或 BDMV/STREAM 下返回体积最大的 M2TS 文件。
 func findLargestM2TS(root string) (string, error) {
 	searchRoot := root
 	stream := filepath.Join(root, "STREAM")
@@ -292,6 +306,7 @@ func findLargestM2TS(root string) (string, error) {
 	return largestPath, nil
 }
 
+// resolveVideoFromMountedISO 挂载 ISO 并在其中选择截图流程要使用的视频文件。
 func resolveVideoFromMountedISO(ctx context.Context, isoPath string) (string, func(), error) {
 	mountDir, cleanup, err := mountISO(ctx, isoPath)
 	if err != nil {
@@ -305,6 +320,7 @@ func resolveVideoFromMountedISO(ctx context.Context, isoPath string) (string, fu
 	return videoPath, cleanup, nil
 }
 
+// resolveBDInfoFromMountedISO 挂载 ISO 并返回其中可供 BDInfo 扫描的蓝光根目录。
 func resolveBDInfoFromMountedISO(ctx context.Context, isoPath string) (string, func(), error) {
 	mountDir, cleanup, err := mountISO(ctx, isoPath)
 	if err != nil {
@@ -317,6 +333,7 @@ func resolveBDInfoFromMountedISO(ctx context.Context, isoPath string) (string, f
 	return mountDir, cleanup, nil
 }
 
+// isVideoFile 判断路径是否属于当前支持的视频扩展名。
 func isVideoFile(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".m2ts", ".mts", ".mkv", ".mp4", ".m4v", ".mov", ".avi", ".wmv", ".flv", ".mpg", ".mpeg", ".m2v", ".ts", ".vob", ".webm":
@@ -326,6 +343,7 @@ func isVideoFile(path string) bool {
 	}
 }
 
+// findVideoFile 优先在当前目录选择体积最大的直接子视频文件；找不到时递归回退。
 func findVideoFile(root string) (string, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -353,6 +371,7 @@ func findVideoFile(root string) (string, error) {
 	return findLargestVideoFile(root)
 }
 
+// findVideoCandidates 在目录树中找出体积最大的若干视频文件，供 MediaInfo 依次重试。
 func findVideoCandidates(root string, limit int) ([]string, error) {
 	if limit <= 0 {
 		limit = 1
@@ -397,6 +416,7 @@ func findVideoCandidates(root string, limit int) ([]string, error) {
 	return results, nil
 }
 
+// resolveScreenshotSourceFromRoot 从目录根路径推断截图流程应该使用的视频文件。
 func resolveScreenshotSourceFromRoot(root string) (string, error) {
 	if bdmvRoot, ok := resolveBDMVRoot(root); ok {
 		return findLargestM2TS(bdmvRoot)
@@ -410,6 +430,7 @@ func resolveScreenshotSourceFromRoot(root string) (string, error) {
 	return findVideoFile(root)
 }
 
+// resolveDVDMediaInfoFileFromRoot 从 DVD 目录中挑选最适合交给 MediaInfo 的 IFO 或 VOB 文件。
 func resolveDVDMediaInfoFileFromRoot(root string) (string, error) {
 	dvdRoot, ok := resolveDVDVideoRoot(root)
 	if !ok {
@@ -434,6 +455,7 @@ func resolveDVDMediaInfoFileFromRoot(root string) (string, error) {
 	return "", err
 }
 
+// findMainDVDTitleSetFirstVOB 选择主标题集对应的首个 VOB 文件。
 func findMainDVDTitleSetFirstVOB(videoTSDir string) (string, error) {
 	entries, err := os.ReadDir(videoTSDir)
 	if err != nil {
@@ -504,6 +526,7 @@ func findMainDVDTitleSetFirstVOB(videoTSDir string) (string, error) {
 	return best.path, nil
 }
 
+// dvdControlIFOPathFromTitleVOB 根据标题 VOB 路径推导对应的控制 IFO 路径。
 func dvdControlIFOPathFromTitleVOB(path string) string {
 	base := filepath.Base(path)
 	if len(base) < len("VTS_00_1.VOB") {
@@ -515,6 +538,7 @@ func dvdControlIFOPathFromTitleVOB(path string) string {
 	return filepath.Join(filepath.Dir(path), base[:7]+"0.IFO")
 }
 
+// dvdTitleVOBPathFromControlFile 根据 DVD 控制文件路径推导对应的首个标题 VOB。
 func dvdTitleVOBPathFromControlFile(path string) string {
 	base := strings.ToUpper(filepath.Base(path))
 	if len(base) < len("VTS_00_0.IFO") {
@@ -532,6 +556,7 @@ func dvdTitleVOBPathFromControlFile(path string) string {
 	return vobPath
 }
 
+// isDVDTitleControlFileName 会判断DVD标题Control文件名称是否满足当前条件。
 func isDVDTitleControlFileName(name string) bool {
 	name = strings.ToUpper(strings.TrimSpace(name))
 	return len(name) == len("VTS_00_0.IFO") &&
@@ -544,6 +569,7 @@ func isDVDTitleControlFileName(name string) bool {
 		(strings.HasSuffix(name, ".IFO") || strings.HasSuffix(name, ".BUP"))
 }
 
+// isDVDTitleVOBName 会判断DVD标题VOB名称是否满足当前条件。
 func isDVDTitleVOBName(name string) bool {
 	name = strings.ToUpper(strings.TrimSpace(name))
 	return len(name) == len("VTS_00_1.VOB") &&
@@ -556,6 +582,7 @@ func isDVDTitleVOBName(name string) bool {
 		strings.HasSuffix(name, ".VOB")
 }
 
+// parseDVDTitleVOBName 会解析DVD标题VOB名称，并把原始输入转换成结构化结果。
 func parseDVDTitleVOBName(name string) (int, int, bool) {
 	name = strings.ToUpper(strings.TrimSpace(name))
 	if !isDVDTitleVOBName(name) {
@@ -567,6 +594,7 @@ func parseDVDTitleVOBName(name string) (int, int, bool) {
 	return titleSet, part, true
 }
 
+// findLargestVideoFile 递归查找目录树中体积最大的受支持视频文件。
 func findLargestVideoFile(root string) (string, error) {
 	var largestPath string
 	var largestSize int64

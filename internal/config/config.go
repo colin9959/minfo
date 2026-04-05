@@ -1,3 +1,5 @@
+// Package config 提供环境变量和超时等基础配置解析。
+
 package config
 
 import (
@@ -17,8 +19,10 @@ const (
 	DefaultRequestTimeout = 10 * time.Minute
 )
 
+// RequestTimeout 保存当前服务处理单个请求时使用的统一超时时间。
 var RequestTimeout = DurationFromEnv("REQUEST_TIMEOUT", DefaultRequestTimeout)
 
+// Getenv 返回环境变量 key 的值；当结果为空字符串时返回 fallback。
 func Getenv(key, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
@@ -27,6 +31,7 @@ func Getenv(key, fallback string) string {
 	return value
 }
 
+// DurationFromEnv 解析时长环境变量；当变量缺失、格式非法或结果非正数时返回 fallback。
 func DurationFromEnv(key string, fallback time.Duration) time.Duration {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {

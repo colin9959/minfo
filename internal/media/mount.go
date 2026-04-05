@@ -1,3 +1,5 @@
+// Package media 提供 ISO 挂载与清理逻辑。
+
 package media
 
 import (
@@ -10,6 +12,7 @@ import (
 	"minfo/internal/system"
 )
 
+// mountISO 将 ISO 只读挂载到临时目录，并返回挂载点和清理函数。
 func mountISO(ctx context.Context, isoPath string) (string, func(), error) {
 	mountBin, err := system.ResolveBin("MOUNT_BIN", "mount")
 	if err != nil {
@@ -56,6 +59,7 @@ func mountISO(ctx context.Context, isoPath string) (string, func(), error) {
 	return mountDir, buildMountCleanup(mountDir, umountBin), nil
 }
 
+// explainISOmountError 补充 UDF 内核模块相关上下文，使挂载错误更容易定位。
 func explainISOmountError(message string, modErr error) string {
 	if isUnknownUDFMountError(message) {
 		if modErr != nil {
@@ -66,11 +70,13 @@ func explainISOmountError(message string, modErr error) string {
 	return message
 }
 
+// isUnknownUDFMountError 会判断UnknownUDF 模块挂载错误是否满足当前条件。
 func isUnknownUDFMountError(message string) bool {
 	lower := strings.ToLower(message)
 	return strings.Contains(lower, "unknown filesystem type 'udf'") || strings.Contains(lower, "unknown filesystem type \"udf\"")
 }
 
+// LoadUDFModule 尝试通过 modprobe 加载 UDF 内核模块。
 func LoadUDFModule(ctx context.Context) error {
 	modprobeBin, err := system.ResolveBin("MODPROBE_BIN", "modprobe")
 	if err != nil {
@@ -87,6 +93,7 @@ func LoadUDFModule(ctx context.Context) error {
 	return nil
 }
 
+// buildMountCleanup 返回一个清理函数，用于卸载 ISO 挂载点并删除临时目录。
 func buildMountCleanup(mountDir, umountBin string) func() {
 	return func() {
 		umountCtx, cancel := context.WithTimeout(context.Background(), config.UmountTimeout)

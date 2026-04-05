@@ -1,3 +1,5 @@
+// Package transport 提供 HTTP 请求解析和输入路径处理。
+
 package transport
 
 import (
@@ -14,6 +16,7 @@ import (
 	"minfo/internal/media"
 )
 
+// EnsurePost 确认请求方法为 POST；不满足时会直接写回 405 响应。
 func EnsurePost(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodPost {
 		WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -22,17 +25,20 @@ func EnsurePost(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// ParseForm 会解析Form，并把原始输入转换成结构化结果。
 func ParseForm(w http.ResponseWriter, r *http.Request) error {
 	r.Body = http.MaxBytesReader(w, r.Body, config.MaxUploadBytes)
 	return r.ParseMultipartForm(config.MaxMemoryBytes)
 }
 
+// CleanupMultipart 释放 ParseMultipartForm 创建的临时文件。
 func CleanupMultipart(r *http.Request) {
 	if r.MultipartForm != nil {
 		_ = r.MultipartForm.RemoveAll()
 	}
 }
 
+// InputPath 从表单里的 path 或上传文件中解析输入路径，并返回对应的清理函数。
 func InputPath(r *http.Request) (string, func(), error) {
 	path := strings.TrimSpace(r.FormValue("path"))
 	path = strings.Trim(path, "\"")
@@ -75,6 +81,7 @@ func InputPath(r *http.Request) (string, func(), error) {
 	return tempFile.Name(), cleanup, nil
 }
 
+// uploadFileName 清理上传文件名，避免路径穿越并为无效名称提供稳定兜底值。
 func uploadFileName(name string) string {
 	cleaned := strings.TrimSpace(name)
 	cleaned = strings.ReplaceAll(cleaned, "\\", "/")

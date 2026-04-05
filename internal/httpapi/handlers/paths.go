@@ -1,3 +1,5 @@
+// Package handlers 提供媒体路径联想接口。
+
 package handlers
 
 import (
@@ -8,6 +10,7 @@ import (
 	"minfo/internal/media"
 )
 
+// PathSuggestHandler 根据前端输入前缀返回路径候选项和对应的根目录信息。
 func PathSuggestHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		transport.WritePathError(w, http.StatusMethodNotAllowed, "method not allowed")
