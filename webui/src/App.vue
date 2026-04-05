@@ -64,11 +64,13 @@
                 <ActionButtons
                     :busy="busy"
                     :active-action="activeAction"
+                    :stopping-action="stoppingAction"
                     :has-input="hasInput"
                     @mediainfo="runInfo('/api/mediainfo', 'MediaInfo', {}, 'mediainfo')"
                     @bdinfo="runInfo('/api/bdinfo', 'BDInfo', { bdinfo_mode: bdinfoMode }, 'bdinfo')"
                     @download-shots="downloadShots"
                     @output-links="outputShotLinks"
+                    @stop-active="stopActiveTask"
                 />
             </div>
         </section>
@@ -86,11 +88,14 @@
         <ImageLinksPanel
             v-if="showImageLinksPanel"
             :busy="busy"
+            :active-action="activeAction"
+            :stopping-action="stoppingAction"
             :copy-links-label="copyLinksLabel"
             :copy-b-b-code-label="copyBBCodeLabel"
             :link-status-text="linkStatusText"
             :link-items="linkItems"
             @append-links="appendShotLinks"
+            @stop-active="stopActiveTask"
             @copy-links="copyLinks"
             @copy-bbcode="copyBBCode"
             @clear="clearLinkItems"
@@ -174,6 +179,7 @@ const {
     linkItems,
     busy,
     activeAction,
+    stoppingAction,
     noticeText,
     linkStatusText,
     copyOutputLabel,
@@ -186,6 +192,7 @@ const {
     downloadShots,
     outputShotLinks,
     appendShotLinks,
+    stopActiveTask,
     clearOutputText,
     clearLinkItems,
     copyOutputText,

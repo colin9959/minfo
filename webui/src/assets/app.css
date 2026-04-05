@@ -433,6 +433,14 @@ input[type="number"] {
   white-space: nowrap;
 }
 
+.action-btn.stoppable,
+button.ghost.stoppable {
+  background: #9b3734;
+  color: white;
+  border-color: #9b3734;
+  box-shadow: 0 8px 18px rgba(155, 55, 52, 0.18);
+}
+
 .action-btn.loading {
   position: relative;
 }

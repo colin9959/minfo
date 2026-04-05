@@ -3,7 +3,14 @@
         <div class="output-header">
             <h2>图床</h2>
             <div class="output-actions">
-                <button class="ghost" :disabled="busy" @click="$emit('append-links')">附加图床链接</button>
+                <button
+                    class="ghost"
+                    :class="{ stoppable: isAppendActive }"
+                    :disabled="appendDisabled"
+                    @click="handleAppendClick"
+                >
+                    {{ appendLabel }}
+                </button>
                 <button class="ghost output-copy-btn" @click="$emit('copy-links')">{{ copyLinksLabel }}</button>
                 <button class="ghost output-copy-btn" @click="$emit('copy-bbcode')">{{ copyBBCodeLabel }}</button>
                 <button class="ghost" :disabled="busy" @click="$emit('clear')">清空</button>
@@ -57,19 +64,46 @@
 </template>
 
 <script setup>
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 
 const props = defineProps({
     busy: { type: Boolean, required: true },
+    activeAction: { type: String, required: true },
+    stoppingAction: { type: String, required: true },
     copyLinksLabel: { type: String, required: true },
     copyBBCodeLabel: { type: String, required: true },
     linkStatusText: { type: String, required: true },
     linkItems: { type: Array, required: true },
 });
 
-defineEmits(["append-links", "copy-links", "copy-bbcode", "clear", "remove-link"]);
+const emit = defineEmits(["append-links", "stop-active", "copy-links", "copy-bbcode", "clear", "remove-link"]);
 
 const previewStateMap = ref({});
+
+const isAppendActive = computed(() => props.busy && props.activeAction === "append-links");
+const appendDisabled = computed(() => {
+    if (isAppendActive.value) {
+        return props.stoppingAction === "append-links";
+    }
+    return props.busy;
+});
+const appendLabel = computed(() => {
+    if (!isAppendActive.value) {
+        return "附加图床链接";
+    }
+    if (props.stoppingAction === "append-links") {
+        return "停止中...";
+    }
+    return "停止任务";
+});
+
+const handleAppendClick = () => {
+    if (isAppendActive.value) {
+        emit("stop-active");
+        return;
+    }
+    emit("append-links");
+};
 
 watch(
     () => props.linkItems,

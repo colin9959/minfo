@@ -46,7 +46,12 @@ func handleScreenshotsPost(w http.ResponseWriter, r *http.Request) {
 
 	path, cleanup, err := transport.InputPath(r)
 	if err != nil {
-		transport.WriteJSON(w, http.StatusBadRequest, transport.InfoResponse{OK: false, Error: err.Error(), Logs: logger.String()})
+		transport.WriteJSON(w, http.StatusBadRequest, transport.InfoResponse{
+			OK:         false,
+			Error:      err.Error(),
+			Logs:       logger.String(),
+			LogEntries: pickRealtimeLogEntries(logger),
+		})
 		return
 	}
 	defer cleanup()
@@ -61,7 +66,12 @@ func handleScreenshotsPost(w http.ResponseWriter, r *http.Request) {
 
 	tempDir, err := os.MkdirTemp("", "minfo-shots-*")
 	if err != nil {
-		transport.WriteJSON(w, http.StatusInternalServerError, transport.InfoResponse{OK: false, Error: err.Error(), Logs: logger.String()})
+		transport.WriteJSON(w, http.StatusInternalServerError, transport.InfoResponse{
+			OK:         false,
+			Error:      err.Error(),
+			Logs:       logger.String(),
+			LogEntries: pickRealtimeLogEntries(logger),
+		})
 		return
 	}
 	defer os.RemoveAll(tempDir)
@@ -69,20 +79,40 @@ func handleScreenshotsPost(w http.ResponseWriter, r *http.Request) {
 	if mode == screenshot.ModeLinks {
 		result, err := screenshot.RunUploadWithLiveLogs(ctx, path, tempDir, variant, subtitleMode, count, logger.LogLine)
 		if err != nil {
-			transport.WriteJSON(w, http.StatusInternalServerError, transport.InfoResponse{OK: false, Error: err.Error(), Logs: pickRealtimeLogs(logger, result.Logs)})
+			transport.WriteJSON(w, http.StatusInternalServerError, transport.InfoResponse{
+				OK:         false,
+				Error:      err.Error(),
+				Logs:       pickRealtimeLogs(logger, result.Logs),
+				LogEntries: pickRealtimeLogEntries(logger),
+			})
 			return
 		}
-		transport.WriteJSON(w, http.StatusOK, transport.InfoResponse{OK: true, Output: result.Output, Logs: pickRealtimeLogs(logger, result.Logs)})
+		transport.WriteJSON(w, http.StatusOK, transport.InfoResponse{
+			OK:         true,
+			Output:     result.Output,
+			Logs:       pickRealtimeLogs(logger, result.Logs),
+			LogEntries: pickRealtimeLogEntries(logger),
+		})
 		return
 	}
 
 	if shouldPrepareDownload(r) {
 		downloadURL, logs, err := prepareScreenshotZipDownload(ctx, path, tempDir, variant, subtitleMode, count, logger.LogLine)
 		if err != nil {
-			transport.WriteJSON(w, http.StatusInternalServerError, transport.InfoResponse{OK: false, Error: err.Error(), Logs: pickRealtimeLogs(logger, logs)})
+			transport.WriteJSON(w, http.StatusInternalServerError, transport.InfoResponse{
+				OK:         false,
+				Error:      err.Error(),
+				Logs:       pickRealtimeLogs(logger, logs),
+				LogEntries: pickRealtimeLogEntries(logger),
+			})
 			return
 		}
-		transport.WriteJSON(w, http.StatusOK, transport.InfoResponse{OK: true, Output: downloadURL, Logs: pickRealtimeLogs(logger, logs)})
+		transport.WriteJSON(w, http.StatusOK, transport.InfoResponse{
+			OK:         true,
+			Output:     downloadURL,
+			Logs:       pickRealtimeLogs(logger, logs),
+			LogEntries: pickRealtimeLogEntries(logger),
+		})
 		return
 	}
 
@@ -182,6 +212,14 @@ func pickRealtimeLogs(logger *infoLogger, fallback string) string {
 		return logs
 	}
 	return fallback
+}
+
+// pickRealtimeLogEntries 优先返回实时日志会话里已经收集的结构化日志；为空时返回 nil。
+func pickRealtimeLogEntries(logger *infoLogger) []transport.LogEntry {
+	if logger == nil {
+		return nil
+	}
+	return logger.Entries()
 }
 
 // servePreparedScreenshotDownload 根据令牌读取已准备好的 ZIP 文件并交给 HTTP 层输出。

@@ -12,25 +12,80 @@ export async function fetchDirectory(prefix = "", signal) {
     return data;
 }
 
-export async function requestInfo(path, url, fields = {}, options = {}) {
-    const response = await postForm(url, attachLogSession({ path, ...fields }, options));
-    const data = await safeReadJSON(response);
-    if (!response.ok || !data.ok) {
-        throw buildResponseError(data.error || "请求失败。", data);
+export async function createInfoJob(path, kind, fields = {}) {
+    const response = await postForm("/api/info-jobs", { path, kind, ...fields });
+    const data = normalizeInfoJobPayload(await safeReadJSON(response));
+    if (!response.ok || !data.ok || typeof data.jobId !== "string" || data.jobId.trim() === "") {
+        throw buildResponseError(data.error || "信息任务创建失败。", data);
     }
     return data;
 }
 
-export async function prepareScreenshotZipDownload(path, variant, subtitleMode, count, options = {}) {
-    const response = await postForm("/api/screenshots", attachLogSession({ path, mode: "zip", variant, subtitle_mode: subtitleMode, count, prepare_download: "1" }, options));
-    const data = await safeReadJSON(response);
-    if (!response.ok || !data.ok || typeof data.output !== "string" || data.output.trim() === "") {
-        throw buildResponseError(data.error || "截图请求失败。", data);
+export async function fetchInfoJob(jobId) {
+    const response = await fetch(`/api/info-jobs/${encodeURIComponent(jobId)}`, {
+        cache: "no-store",
+        headers: {
+            "Cache-Control": "no-store",
+        },
+    });
+    const data = normalizeInfoJobPayload(await safeReadJSON(response));
+    if (!response.ok || !data.ok) {
+        throw buildResponseError(data.error || "信息任务状态读取失败。", data);
     }
-    return {
-        downloadURL: new URL(data.output, window.location.origin).toString(),
-        logs: typeof data.logs === "string" ? data.logs : "",
-    };
+    return data;
+}
+
+export async function cancelInfoJob(jobId) {
+    const response = await fetch(`/api/info-jobs/${encodeURIComponent(jobId)}`, {
+        method: "DELETE",
+        cache: "no-store",
+        headers: {
+            "Cache-Control": "no-store",
+        },
+    });
+    const data = normalizeInfoJobPayload(await safeReadJSON(response));
+    if (!response.ok || !data.ok) {
+        throw buildResponseError(data.error || "信息任务取消失败。", data);
+    }
+    return data;
+}
+
+export async function createScreenshotJob(path, variant, subtitleMode, count, mode) {
+    const response = await postForm("/api/screenshot-jobs", { path, mode, variant, subtitle_mode: subtitleMode, count });
+    const data = normalizeScreenshotJobPayload(await safeReadJSON(response));
+    if (!response.ok || !data.ok || typeof data.jobId !== "string" || data.jobId.trim() === "") {
+        throw buildResponseError(data.error || "截图任务创建失败。", data);
+    }
+    return data;
+}
+
+export async function fetchScreenshotJob(jobId) {
+    const response = await fetch(`/api/screenshot-jobs/${encodeURIComponent(jobId)}`, {
+        cache: "no-store",
+        headers: {
+            "Cache-Control": "no-store",
+        },
+    });
+    const data = normalizeScreenshotJobPayload(await safeReadJSON(response));
+    if (!response.ok || !data.ok) {
+        throw buildResponseError(data.error || "截图任务状态读取失败。", data);
+    }
+    return data;
+}
+
+export async function cancelScreenshotJob(jobId) {
+    const response = await fetch(`/api/screenshot-jobs/${encodeURIComponent(jobId)}`, {
+        method: "DELETE",
+        cache: "no-store",
+        headers: {
+            "Cache-Control": "no-store",
+        },
+    });
+    const data = normalizeScreenshotJobPayload(await safeReadJSON(response));
+    if (!response.ok || !data.ok) {
+        throw buildResponseError(data.error || "截图任务取消失败。", data);
+    }
+    return data;
 }
 
 export function startPreparedDownload(url) {
@@ -40,96 +95,6 @@ export function startPreparedDownload(url) {
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-}
-
-export async function requestScreenshotLinks(path, variant, subtitleMode, count, options = {}) {
-    const response = await postForm("/api/screenshots", attachLogSession({ path, mode: "links", variant, subtitle_mode: subtitleMode, count }, options));
-    const data = await safeReadJSON(response);
-    if (!response.ok || !data.ok) {
-        throw buildResponseError(data.error || "图床链接请求失败。", data);
-    }
-    return data;
-}
-
-export function createLiveLogStream(label) {
-    if (typeof window === "undefined" || typeof window.WebSocket !== "function") {
-        return {
-            sessionId: "",
-            close: () => {},
-            hasLiveMessages: () => false,
-        };
-    }
-
-    const sessionId = createLogSessionId();
-    const url = new URL("/api/logs", window.location.origin);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    url.searchParams.set("session", sessionId);
-
-    let messageCount = 0;
-    let closed = false;
-    let warned = false;
-    let socket = null;
-
-    try {
-        socket = new window.WebSocket(url.toString());
-    } catch (error) {
-        console.warn(`[${label}] 无法创建实时日志连接。`, error);
-        return {
-            sessionId: "",
-            close: () => {},
-            hasLiveMessages: () => false,
-        };
-    }
-
-    const close = () => {
-        if (closed) {
-            return;
-        }
-        closed = true;
-        if (socket.readyState === window.WebSocket.CONNECTING || socket.readyState === window.WebSocket.OPEN) {
-            socket.close();
-        }
-    };
-
-    socket.addEventListener("message", (event) => {
-        const payload = parseLogPayload(event.data);
-        if (!payload) {
-            return;
-        }
-        if (payload.type === "end") {
-            close();
-            return;
-        }
-        if (payload.type !== "line") {
-            return;
-        }
-
-        messageCount += 1;
-        const timestampPrefix = typeof payload.timestamp === "string" && payload.timestamp !== "" ? `[${payload.timestamp}] ` : "";
-        if (typeof payload.message === "string" && payload.message !== "") {
-            console.log(`[${label}] ${timestampPrefix}${payload.message}`);
-            return;
-        }
-        console.log(`[${label}] ${timestampPrefix}`.trimEnd());
-    });
-
-    socket.addEventListener("error", () => {
-        if (warned) {
-            return;
-        }
-        warned = true;
-        console.warn(`[${label}] 实时日志连接异常，将回退到请求完成后的日志。`);
-    });
-
-    socket.addEventListener("close", () => {
-        closed = true;
-    });
-
-    return {
-        sessionId,
-        close,
-        hasLiveMessages: () => messageCount > 0,
-    };
 }
 
 async function postForm(url, fields = {}) {
@@ -155,30 +120,50 @@ function buildResponseError(message, data = {}) {
     if (typeof data.logs === "string" && data.logs.trim() !== "") {
         error.logs = data.logs;
     }
+    if (Array.isArray(data.logEntries) && data.logEntries.length > 0) {
+        error.logEntries = data.logEntries;
+    }
     return error;
 }
 
-function attachLogSession(fields = {}, options = {}) {
-    if (typeof options.logSession !== "string" || options.logSession.trim() === "") {
-        return fields;
+function normalizeLogEntries(entries) {
+    if (!Array.isArray(entries)) {
+        return [];
     }
-    return { ...fields, log_session: options.logSession.trim() };
+    return entries
+        .filter((entry) => entry && typeof entry === "object")
+        .map((entry) => ({
+            timestamp: typeof entry.timestamp === "string" ? entry.timestamp : "",
+            message: typeof entry.message === "string" ? entry.message : "",
+        }))
+        .filter((entry) => entry.timestamp !== "" || entry.message !== "");
 }
 
-function createLogSessionId() {
-    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-        return crypto.randomUUID();
-    }
-    return `log-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+function normalizeInfoJobPayload(data = {}) {
+    return {
+        ...data,
+        ok: data.ok === true,
+        jobId: typeof data.job_id === "string" ? data.job_id : "",
+        status: typeof data.status === "string" ? data.status : "",
+        kind: typeof data.kind === "string" ? data.kind : "",
+        output: typeof data.output === "string" ? data.output : "",
+        error: typeof data.error === "string" ? data.error : "",
+        logs: typeof data.logs === "string" ? data.logs : "",
+        logEntries: normalizeLogEntries(data.log_entries),
+    };
 }
 
-function parseLogPayload(value) {
-    if (typeof value !== "string" || value.trim() === "") {
-        return null;
-    }
-    try {
-        return JSON.parse(value);
-    } catch {
-        return null;
-    }
+function normalizeScreenshotJobPayload(data = {}) {
+    return {
+        ...data,
+        ok: data.ok === true,
+        jobId: typeof data.job_id === "string" ? data.job_id : "",
+        status: typeof data.status === "string" ? data.status : "",
+        mode: typeof data.mode === "string" ? data.mode : "",
+        output: typeof data.output === "string" ? data.output : "",
+        downloadURL: typeof data.download_url === "string" ? data.download_url : "",
+        error: typeof data.error === "string" ? data.error : "",
+        logs: typeof data.logs === "string" ? data.logs : "",
+        logEntries: normalizeLogEntries(data.log_entries),
+    };
 }

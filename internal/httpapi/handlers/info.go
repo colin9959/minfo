@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"minfo/internal/bdinfo"
@@ -17,6 +18,11 @@ import (
 	"minfo/internal/httpapi/transport"
 	"minfo/internal/media"
 	"minfo/internal/system"
+)
+
+const (
+	defaultMediaInfoEnvKey   = "MEDIAINFO_BIN"
+	defaultMediaInfoFallback = "mediainfo"
 )
 
 // MediaInfoHandler 返回处理 MediaInfo 请求的 HTTP Handler，并在候选源之间重试直到拿到有效输出。
@@ -53,49 +59,18 @@ func MediaInfoHandler(envKey, fallback string) http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), config.RequestTimeout)
 		defer cancel()
 
-		candidates, sourceCleanup, err := media.ResolveMediaInfoCandidates(ctx, path, media.MediaInfoCandidateLimit)
+		output, err := runMediaInfo(ctx, path, logger, bin)
 		if err != nil {
-			logger.Logf("[mediainfo] 解析候选源失败: %s", err.Error())
-			writeInfoError(w, http.StatusBadRequest, err.Error(), logger)
-			return
-		}
-		defer sourceCleanup()
-		logger.Logf("[mediainfo] 候选源数量: %d", len(candidates))
-
-		var lastErr string
-		for idx, sourcePath := range candidates {
-			sourceDir := filepath.Dir(sourcePath)
-			sourceName := filepath.Base(sourcePath)
-			logger.Logf("[mediainfo] 尝试 %d/%d: %s", idx+1, len(candidates), sourcePath)
-			logger.Logf("[mediainfo] 执行命令: cwd=%s | %s", sourceDir, formatCommand(bin, sourceName))
-
-			stdout, stderr, err := system.RunCommandInDirLive(ctx, sourceDir, bin, logger.CommandOutput("mediainfo"), sourceName)
-			if err != nil {
-				lastErr = system.BestErrorMessage(err, stderr, stdout)
-				logger.LogMultiline("[mediainfo][error] ", lastErr)
-				continue
-			}
-
-			output := system.CombineCommandOutput(stdout, stderr)
-			if output == "" {
-				lastErr = fmt.Sprintf("mediainfo returned empty output for: %s", sourcePath)
-				logger.Logf("[mediainfo] 返回空输出: %s", sourcePath)
-				continue
-			}
-
-			logger.Logf("[mediainfo] 完成: %s", sourcePath)
-			transport.WriteJSON(w, http.StatusOK, transport.InfoResponse{
-				OK:     true,
-				Output: output,
-				Logs:   logger.String(),
-			})
+			writeInfoError(w, http.StatusInternalServerError, err.Error(), logger)
 			return
 		}
 
-		if lastErr == "" {
-			lastErr = "mediainfo returned empty output"
-		}
-		writeInfoError(w, http.StatusInternalServerError, lastErr, logger)
+		transport.WriteJSON(w, http.StatusOK, transport.InfoResponse{
+			OK:         true,
+			Output:     output,
+			Logs:       logger.String(),
+			LogEntries: logger.Entries(),
+		})
 	}
 }
 
@@ -125,29 +100,16 @@ func BDInfoHandler() http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), config.RequestTimeout)
 		defer cancel()
 
-		result, err := bdinfo.Run(ctx, path, bdinfo.RunOptions{
-			CommandOutput: logger.CommandOutput("bdinfo"),
-			Logf:          logger.Logf,
-		})
+		output, err := runBDInfo(ctx, path, r.FormValue("bdinfo_mode"), logger)
 		if err != nil {
-			logger.LogMultiline("[bdinfo][error] ", err.Error())
 			writeInfoError(w, http.StatusInternalServerError, err.Error(), logger)
 			return
 		}
-
-		output := result.Output
-		if shouldExtractBDInfoCode(r.FormValue("bdinfo_mode")) {
-			logger.Logf("[bdinfo] 输出模式: 精简报告")
-			output = bdinfo.ExtractCodeBlock(output)
-		} else {
-			logger.Logf("[bdinfo] 输出模式: 完整报告")
-		}
-
-		logger.Logf("[bdinfo] 完成: %s", result.ResolvedPath)
 		transport.WriteJSON(w, http.StatusOK, transport.InfoResponse{
-			OK:     true,
-			Output: output,
-			Logs:   logger.String(),
+			OK:         true,
+			Output:     output,
+			Logs:       logger.String(),
+			LogEntries: logger.Entries(),
 		})
 	}
 }
@@ -157,13 +119,78 @@ func shouldExtractBDInfoCode(mode string) bool {
 	return strings.TrimSpace(strings.ToLower(mode)) != "full"
 }
 
+// runMediaInfo 会执行完整的 MediaInfo 探测流程，并返回最终输出文本。
+func runMediaInfo(ctx context.Context, path string, logger *infoLogger, bin string) (string, error) {
+	candidates, sourceCleanup, err := media.ResolveMediaInfoCandidates(ctx, path, media.MediaInfoCandidateLimit)
+	if err != nil {
+		logger.Logf("[mediainfo] 解析候选源失败: %s", err.Error())
+		return "", err
+	}
+	defer sourceCleanup()
+	logger.Logf("[mediainfo] 候选源数量: %d", len(candidates))
+
+	var lastErr string
+	for idx, sourcePath := range candidates {
+		sourceDir := filepath.Dir(sourcePath)
+		sourceName := filepath.Base(sourcePath)
+		logger.Logf("[mediainfo] 尝试 %d/%d: %s", idx+1, len(candidates), sourcePath)
+		logger.Logf("[mediainfo] 执行命令: cwd=%s | %s", sourceDir, formatCommand(bin, sourceName))
+
+		stdout, stderr, err := system.RunCommandInDirLive(ctx, sourceDir, bin, logger.CommandOutput("mediainfo"), sourceName)
+		if err != nil {
+			lastErr = system.BestErrorMessage(err, stderr, stdout)
+			logger.LogMultiline("[mediainfo][error] ", lastErr)
+			continue
+		}
+
+		output := system.CombineCommandOutput(stdout, stderr)
+		if output == "" {
+			lastErr = fmt.Sprintf("mediainfo returned empty output for: %s", sourcePath)
+			logger.Logf("[mediainfo] 返回空输出: %s", sourcePath)
+			continue
+		}
+
+		logger.Logf("[mediainfo] 完成: %s", sourcePath)
+		return output, nil
+	}
+
+	if lastErr == "" {
+		lastErr = "mediainfo returned empty output"
+	}
+	return "", fmt.Errorf("%s", lastErr)
+}
+
+// runBDInfo 会执行完整的 BDInfo 探测流程，并按请求模式返回精简或完整输出。
+func runBDInfo(ctx context.Context, path, mode string, logger *infoLogger) (string, error) {
+	result, err := bdinfo.Run(ctx, path, bdinfo.RunOptions{
+		CommandOutput: logger.CommandOutput("bdinfo"),
+		Logf:          logger.Logf,
+	})
+	if err != nil {
+		logger.LogMultiline("[bdinfo][error] ", err.Error())
+		return "", err
+	}
+
+	output := result.Output
+	if shouldExtractBDInfoCode(mode) {
+		logger.Logf("[bdinfo] 输出模式: 精简报告")
+		output = bdinfo.ExtractCodeBlock(output)
+	} else {
+		logger.Logf("[bdinfo] 输出模式: 完整报告")
+	}
+
+	logger.Logf("[bdinfo] 完成: %s", result.ResolvedPath)
+	return output, nil
+}
+
 type infoLogger struct {
+	mu      sync.Mutex
 	session *logstream.Session
 	lines   []timedLogLine
 }
 
 type timedLogLine struct {
-	timestamp string
+	timestamp time.Time
 	message   string
 }
 
@@ -180,14 +207,16 @@ func (l *infoLogger) Logf(format string, args ...any) {
 	if l == nil {
 		return
 	}
-	timestamp := time.Now().Format("15:04:05")
+	now := time.Now()
 	line := fmt.Sprintf(format, args...)
+	l.mu.Lock()
 	l.lines = append(l.lines, timedLogLine{
-		timestamp: timestamp,
+		timestamp: now,
 		message:   line,
 	})
+	l.mu.Unlock()
 	if l.session != nil {
-		l.session.Publish(line)
+		l.session.PublishAt(now, line)
 	}
 }
 
@@ -222,19 +251,52 @@ func (l *infoLogger) CommandOutput(scope string) system.OutputLineHandler {
 
 // String 返回当前请求已经累积的完整日志文本。
 func (l *infoLogger) String() string {
-	if l == nil || len(l.lines) == 0 {
+	if l == nil {
+		return ""
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if len(l.lines) == 0 {
 		return ""
 	}
 
 	formatted := make([]string, 0, len(l.lines))
 	for _, line := range l.lines {
-		if line.timestamp == "" {
+		if line.timestamp.IsZero() {
 			formatted = append(formatted, line.message)
 			continue
 		}
-		formatted = append(formatted, fmt.Sprintf("[%s] %s", line.timestamp, line.message))
+		formatted = append(formatted, fmt.Sprintf("[%s] %s", line.timestamp.Format("15:04:05"), line.message))
 	}
 	return strings.Join(formatted, "\n")
+}
+
+// Entries 返回当前请求已经累积的结构化日志列表，供前端按本地时区重新格式化。
+func (l *infoLogger) Entries() []transport.LogEntry {
+	if l == nil {
+		return nil
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if len(l.lines) == 0 {
+		return nil
+	}
+
+	entries := make([]transport.LogEntry, 0, len(l.lines))
+	for _, line := range l.lines {
+		entry := transport.LogEntry{
+			Message: line.message,
+		}
+		if !line.timestamp.IsZero() {
+			entry.Timestamp = line.timestamp.UTC().Format(time.RFC3339Nano)
+		}
+		entries = append(entries, entry)
+	}
+	return entries
 }
 
 // Close 会关闭当前日志会话，通知订阅端后续不再推送新内容。
@@ -248,9 +310,10 @@ func (l *infoLogger) Close() {
 // writeInfoError 会把统一格式的错误响应连同当前日志一起写回客户端。
 func writeInfoError(w http.ResponseWriter, status int, message string, logger *infoLogger) {
 	transport.WriteJSON(w, status, transport.InfoResponse{
-		OK:    false,
-		Error: message,
-		Logs:  logger.String(),
+		OK:         false,
+		Error:      message,
+		Logs:       logger.String(),
+		LogEntries: logger.Entries(),
 	})
 }
 

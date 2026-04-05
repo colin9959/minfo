@@ -74,10 +74,15 @@ func Open(raw string) *Session {
 
 // Publish 会广播日志会话，把日志或事件发送给当前订阅方。
 func (s *Session) Publish(message string) {
+	s.PublishAt(time.Now(), message)
+}
+
+// PublishAt 会使用指定时间广播一条日志消息，便于调用方保持实时流和回退日志时间一致。
+func (s *Session) PublishAt(timestamp time.Time, message string) {
 	if s == nil {
 		return
 	}
-	s.hub.publish(s.id, strings.TrimRight(message, "\r\n"))
+	s.hub.publish(s.id, timestamp, strings.TrimRight(message, "\r\n"))
 }
 
 // Publishf 按格式化字符串写入一条日志消息。
@@ -85,7 +90,7 @@ func (s *Session) Publishf(format string, args ...any) {
 	if s == nil {
 		return
 	}
-	s.Publish(fmt.Sprintf(format, args...))
+	s.PublishAt(time.Now(), fmt.Sprintf(format, args...))
 }
 
 // Close 会关闭日志会话，并释放当前流程持有的资源。
@@ -140,12 +145,12 @@ func (h *hub) ensureSession(sessionID string) *sessionState {
 	return state
 }
 
-// publish 会广播日志会话，把日志或事件发送给当前订阅方。
-func (h *hub) publish(sessionID, message string) {
+// publish 会使用指定时间广播日志会话，把日志或事件发送给当前订阅方。
+func (h *hub) publish(sessionID string, timestamp time.Time, message string) {
 	state := h.ensureSession(sessionID)
 	event := Event{
 		Type:      "line",
-		Timestamp: time.Now().Format("15:04:05"),
+		Timestamp: formatEventTimestamp(timestamp),
 		Message:   message,
 	}
 
@@ -174,7 +179,7 @@ func (h *hub) close(sessionID string) {
 
 	event := Event{
 		Type:      "end",
-		Timestamp: time.Now().Format("15:04:05"),
+		Timestamp: formatEventTimestamp(time.Now()),
 	}
 
 	state.mu.Lock()
@@ -332,4 +337,12 @@ func (s *subscriber) readLoop(sessionID string) {
 // writeEvent 将单条事件编码成 JSON 并写入当前 WebSocket 连接。
 func (s *subscriber) writeEvent(event Event) error {
 	return s.conn.WriteJSON(event)
+}
+
+// formatEventTimestamp 会把事件时间编码成 RFC3339Nano 格式的 UTC 时间字符串。
+func formatEventTimestamp(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }
