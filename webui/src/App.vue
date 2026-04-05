@@ -2,7 +2,7 @@
     <div class="grain"></div>
     <main class="shell">
         <NoticeToast :text="noticeText" />
-        <AppHeader />
+        <AppHeader :version-label="versionLabel" :repo-url="repoUrl" />
 
         <section class="panel">
             <PathBrowser
@@ -96,6 +96,7 @@
             @clear="clearLinkItems"
             @remove-link="removeLink"
         />
+
     </main>
 </template>
 
@@ -113,6 +114,10 @@ import ScreenshotVariantPicker from "./components/ScreenshotVariantPicker.vue";
 import { useMediaActions } from "./composables/useMediaActions";
 import { usePathBrowser } from "./composables/usePathBrowser";
 import { loadAppState, saveAppState } from "./utils/storage";
+
+const repoUrl = "https://github.com/mirrorb/minfo";
+const appVersion = `${import.meta.env.VITE_APP_VERSION || "dev"}`.trim() || "dev";
+const versionLabel = /^\d/.test(appVersion) ? `v${appVersion}` : appVersion;
 
 const persistedState = loadAppState();
 const screenshotVariant = ref(persistedState.screenshotVariant);

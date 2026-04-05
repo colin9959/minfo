@@ -38,9 +38,9 @@ body {
 .shell {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 48px 32px 64px;
+  padding: 14px 32px 56px;
   display: grid;
-  gap: 28px;
+  gap: 20px;
 }
 
 .notice-toast {
@@ -70,10 +70,66 @@ body {
 }
 
 .hero {
+  position: relative;
   display: grid;
-  gap: 24px;
+  gap: 8px;
   grid-template-columns: 1fr;
+  align-items: flex-start;
+  padding-top: 2px;
+}
+
+.hero-meta {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
   align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  z-index: 3;
+}
+
+.hero-version {
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.hero-repo-link {
+  position: relative;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-decoration: none;
+  pointer-events: auto;
+  transition:
+    transform 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.hero-repo-link:hover {
+  transform: translateY(-1px);
+  opacity: 0.72;
+}
+
+.hero-repo-link svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+
+.hero-copy {
+  max-width: 760px;
+  padding-right: 120px;
 }
 
 .kicker {
@@ -87,11 +143,11 @@ body {
 h1 {
   font-family: var(--font-display);
   font-size: clamp(2.4rem, 5vw, 3.8rem);
-  margin: 0 0 12px;
+  margin: 0 0 4px;
 }
 
 .lead {
-  font-size: 1.1rem;
+  font-size: 1rem;
   color: var(--muted);
   margin: 0;
 }
@@ -597,11 +653,6 @@ pre {
   padding: 10px 14px;
 }
 
-.footer {
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
 @keyframes rise {
   from {
     opacity: 0;
@@ -629,8 +680,18 @@ pre {
     grid-template-columns: 1fr;
   }
 
+  .hero-meta {
+    position: static;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .hero-copy {
+    padding-right: 0;
+  }
+
   .shell {
-    padding: 32px 20px 48px;
+    padding: 12px 20px 44px;
   }
 
   .config-grid {
