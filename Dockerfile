@@ -68,7 +68,7 @@ RUN set -eux; \
     find /out/bdinfo -type f \( -name '*.pdb' -o -name '*.xml' -o -name '*.dbg' \) -delete
 
 # 构建 BD/DVD 元数据 helper
-FROM --platform=$BUILDPLATFORM alpine:3.19 AS media-helper-build
+FROM --platform=$TARGETPLATFORM alpine:3.19 AS media-helper-build
 RUN apk add --no-cache build-base
 WORKDIR /src
 COPY tools/bdsub_probe.c ./tools/bdsub_probe.c
