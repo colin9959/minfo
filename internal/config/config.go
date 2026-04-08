@@ -16,7 +16,7 @@ const (
 	MaxMemoryBytes        = int64(32 << 20)
 	MountTimeout          = 30 * time.Second
 	UmountTimeout         = 30 * time.Second
-	DefaultRequestTimeout = 10 * time.Minute
+	DefaultRequestTimeout = 20 * time.Minute
 )
 
 // RequestTimeout 保存当前服务处理单个请求时使用的统一超时时间。
