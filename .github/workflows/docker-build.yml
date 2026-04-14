@@ -1,62 +1,40 @@
-name: Docker Build and Publish Multi-Arch
+name: Build and Push Docker Image
 
 on:
   push:
-    tags: [ 'v*.*.*' ]
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+    tags:
+      - 'v*'  # 仅当推送 v 开头的 Tag 时触发（如 v1.0.0）
 
 jobs:
-  build-and-push:
+  build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      packages: write
+      packages: write  # 允许推送镜像到 GHCR
+      contents: read   # 允许读取仓库代码
 
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Compute app version
-        id: app_version
-        shell: bash
-        run: |
-          value="${GITHUB_REF_NAME#v}"
-          echo "value=$value" >> "$GITHUB_OUTPUT"
-
-      - name: Log in to the Container registry
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GITHUB_TOKEN }}  # GitHub 自动生成的 Token，无需手动配置
 
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest
+      - name: Extract version from tag
+        id: extract_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
-      - name: Build and push Docker image
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
-          target: runtime
-          platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            APP_VERSION=${{ steps.app_version.outputs.value }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: |
+            ghcr.io/colin9959/minfo:${{ env.VERSION }}
+            ghcr.io/colin9959/minfo:latest

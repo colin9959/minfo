@@ -8,6 +8,12 @@ type LogEntry struct {
 	Message   string `json:"message,omitempty"`
 }
 
+type ProgressInfo struct {
+	Current int    `json:"current,omitempty"`
+	Total   int    `json:"total,omitempty"`
+	Stage   string `json:"stage,omitempty"`
+}
+
 // InfoResponse 表示信息类接口共用的 JSON 响应。
 type InfoResponse struct {
 	OK         bool       `json:"ok"`
@@ -19,15 +25,16 @@ type InfoResponse struct {
 
 // ScreenshotJobResponse 表示截图后台任务的创建结果、状态查询结果和最终产出。
 type ScreenshotJobResponse struct {
-	OK          bool       `json:"ok"`
-	JobID       string     `json:"job_id,omitempty"`
-	Status      string     `json:"status,omitempty"`
-	Mode        string     `json:"mode,omitempty"`
-	Output      string     `json:"output,omitempty"`
-	DownloadURL string     `json:"download_url,omitempty"`
-	Error       string     `json:"error,omitempty"`
-	Logs        string     `json:"logs,omitempty"`
-	LogEntries  []LogEntry `json:"log_entries,omitempty"`
+	OK          bool         `json:"ok"`
+	JobID       string       `json:"job_id,omitempty"`
+	Status      string       `json:"status,omitempty"`
+	Mode        string       `json:"mode,omitempty"`
+	Output      string       `json:"output,omitempty"`
+	DownloadURL string       `json:"download_url,omitempty"`
+	Error       string       `json:"error,omitempty"`
+	Logs        string       `json:"logs,omitempty"`
+	LogEntries  []LogEntry   `json:"log_entries,omitempty"`
+	Progress    ProgressInfo `json:"progress,omitempty"`
 }
 
 // InfoJobResponse 表示信息类后台任务的创建结果、状态查询结果和最终输出。

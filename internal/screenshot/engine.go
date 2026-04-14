@@ -353,7 +353,9 @@ func (r *screenshotRunner) run() ([]string, error) {
 	usedNames := make(map[string]int, len(r.requested))
 	usedSeconds := make(map[int]struct{}, len(r.requested))
 
-	for _, requested := range r.requested {
+	for index, requested := range r.requested {
+		step := index + 1
+		r.logf("[进度] 准备截图 %d/%d", step, len(r.requested))
 		aligned := requested
 		if r.subtitle.Mode != "none" {
 			aligned = r.alignToSubtitle(requested)
@@ -382,11 +384,13 @@ func (r *screenshotRunner) run() ([]string, error) {
 		)
 
 		if err := r.captureScreenshot(aligned, outputPath); err != nil {
+			r.logf("[进度] 截图失败 %d/%d: %s", step, len(r.requested), outputName)
 			failures = append(failures, fmt.Sprintf("[失败] 文件: %s\n原因: %s", filepath.Base(outputPath), err.Error()))
 			continue
 		}
 		usedSeconds[screenshotSecond(aligned)] = struct{}{}
 		successCount++
+		r.logf("[进度] 截图完成 %d/%d: %s", successCount, len(r.requested), outputName)
 	}
 
 	r.logf("")
