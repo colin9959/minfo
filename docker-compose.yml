@@ -1,0 +1,24 @@
+services:
+  minfo:
+    image: ${MINFO_IMAGE:-minfo-local}
+    container_name: ${MINFO_CONTAINER_NAME:-minfo-local}
+    build:
+      context: .
+      target: runtime
+      args:
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        http_proxy: "${http_proxy:-}"
+        https_proxy: "${https_proxy:-}"
+    privileged: true
+    ports:
+      - "${HOST_PORT:-38080}:${PORT:-28080}"
+    environment:
+      PORT: "${PORT:-28080}"
+      REQUEST_TIMEOUT: "${REQUEST_TIMEOUT:-20m}"
+      WEB_USERNAME: "${WEB_USERNAME:-}"
+      WEB_PASSWORD: "${WEB_PASSWORD:-}"
+    volumes:
+      - /lib/modules:/lib/modules:ro # 程序会自动尝试加载 `udf` 内核模块用于挂载ISO
+      - ${MEDIA_PATH_1:-./test-media}:/media_path1:ro
+    restart: unless-stopped
