@@ -470,7 +470,12 @@ func minInt(a, b int) int {
 	}
 	return b
 }
-const maxInt = 100
+func maxInt(a, b int) int {
+    if a > b {
+        return a
+    }
+    return b
+}
 
 // normalizeCountValue 规范化内部使用的截图数量。
 func normalizeCountValue(count int) int {
