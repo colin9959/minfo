@@ -72,11 +72,13 @@ docker compose up -d
 - `SCREENSHOT_PNGQUANT_QUALITY_MIN`：ARM 平台调用 `pngquant` 时的最小质量，默认 `65`
 - `SCREENSHOT_PNGQUANT_QUALITY_MAX`：ARM 平台调用 `pngquant` 时的最大质量，默认 `90`
 
-## PNG 压缩策略
+## 截图策略调整
 
-- **x86 / x86_64**：优先使用你提供并内置的 `nconvert`
-- **ARM / ARM64**：不使用 `nconvert`，改为使用系统安装的 `pngquant`
-- 若对应平台的压缩工具不存在，程序会跳过该额外压缩步骤，但截图主流程仍可正常运行
+- 默认不挂载字幕（除非后续明确启用）
+- 截图时间点按影片时长使用固定步长生成
+- 单张 PNG 截图只有在 **大于 10MB** 时才会触发压缩
+- **x86 / x86_64**：优先使用内置 `nconvert`
+- **ARM / ARM64**：使用 `pngquant`
 
 ## nconvert 集成
 
@@ -88,24 +90,17 @@ docker compose up -d
 third_party/nconvert/nconvert
 ```
 
-要求：
-
-- 该文件应为目标系统可执行二进制（例如 Linux x86_64 / arm64 对应版本）
-- 需要有执行权限；若无执行权限，Docker 构建和安装脚本会尝试修正
-
 安装方式：
 
 ```bash
 sh scripts/install-nconvert.sh
 ```
 
-Docker 构建时若检测到 `third_party/nconvert/nconvert` 存在，会自动安装到：
+Docker 构建时若检测到 `third_party/nconvert/nconvert` 存在，且目标架构为 `amd64`，会自动安装到：
 
 ```text
 /usr/local/bin/nconvert
 ```
-
-若未提供 `nconvert`，程序仍可正常运行，只是不会执行该额外 PNG 压缩步骤。
 
 ## 许可证
 

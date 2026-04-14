@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"minfo/internal/media"
@@ -154,6 +155,8 @@ type screenshotRunner struct {
 	ffprobeBin       string
 	mediainfoBin     string
 	bdsubBin         string
+	nconvertBin      string
+	pngquantBin      string
 	logLines         []string
 	logHandler       LogHandler
 
@@ -169,6 +172,8 @@ type screenshotRunner struct {
 	duration    float64
 	videoWidth  int
 	videoHeight int
+	trueWidth   int
+	trueHeight  int
 	aspectChain string
 	colorInfo   string
 	colorChain  string
@@ -284,6 +289,12 @@ func (r *screenshotRunner) init(timestamps []string) error {
 	if bin, binErr := system.ResolveBin(system.BDSubBinaryPath); binErr == nil {
 		r.bdsubBin = bin
 	}
+	if bin, binErr := system.ResolveOptionalBin(system.NConvertBinaryPath); binErr == nil {
+		r.nconvertBin = bin
+	}
+	if bin, binErr := system.ResolveOptionalBin(system.PNGQuantBinaryPath); binErr == nil {
+		r.pngquantBin = bin
+	}
 
 	r.requested, err = parseRequestedTimestamps(timestamps)
 	if err != nil {
@@ -320,10 +331,20 @@ func (r *screenshotRunner) init(timestamps []string) error {
 	r.logSelectedSubtitleSummary()
 
 	r.videoWidth, r.videoHeight = r.detectVideoDimensions()
+	r.trueWidth, r.trueHeight = r.detectTrueResolution(r.videoWidth, r.videoHeight)
 	r.aspectChain = r.detectDisplayAspectFilter()
 
 	r.colorInfo = r.detectColorspace()
 	r.colorChain = buildColorspaceChain(r.colorInfo)
+	if runtime.GOARCH == "arm64" || strings.HasPrefix(runtime.GOARCH, "arm") {
+		if strings.TrimSpace(r.pngquantBin) != "" {
+			r.logf("[信息] 当前架构 %s：PNG 压缩优先使用 pngquant。", runtime.GOARCH)
+		} else {
+			r.logf("[提示] 当前架构 %s：未检测到 pngquant，将跳过额外 PNG 压缩。", runtime.GOARCH)
+		}
+	} else if strings.TrimSpace(r.nconvertBin) != "" {
+		r.logf("[信息] 当前架构 %s：PNG 压缩优先使用 nconvert。", runtime.GOARCH)
+	}
 	if r.colorInfo != "" {
 		r.logf("[信息] 检测到色彩空间：%s", strings.TrimSuffix(r.colorInfo, "|"))
 		if r.colorChain != "" {

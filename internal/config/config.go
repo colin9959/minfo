@@ -61,7 +61,7 @@ func BoolFromEnv(key string, fallback bool) bool {
 	return parsed
 }
 
-// IntFromEnv 解析整数环境变量，并可选限制在 min/max 范围内。
+// IntFromEnv 解析整数环境变量，并限制在 min/max 范围内。
 func IntFromEnv(key string, fallback, min, max int) int {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {

@@ -3,6 +3,9 @@ ARG BDINFO_REF=master
 ARG BDINFO_CSPROJ=BDInfo/BDInfo.csproj
 ARG GO_VERSION=1.26.1
 ARG APP_VERSION=dev
+ARG ALPINE_VERSION=edge
+ARG ALPINE_EDGE_REPO=https://dl-cdn.alpinelinux.org/alpine/edge
+ARG FFMPEG_PKG=ffmpeg=8.1-r0
 
 # 构建 WebUI
 FROM --platform=$BUILDPLATFORM node:20-alpine AS webui
@@ -38,7 +41,7 @@ RUN apk add --no-cache git ca-certificates
 RUN git clone --depth 1 --branch "$BDINFO_REF" "$BDINFO_REPO" /src/bdinfo
 WORKDIR /src/bdinfo
 RUN set -eux; \
-    # 匹配 Alpine (musl) 架构的 RID
+    # 匹配 Alpine (musl) 运行环境的 RID
     case "$TARGETARCH" in \
         amd64) rid="linux-musl-x64" ;; \
         arm64) rid="linux-musl-arm64" ;; \
@@ -55,56 +58,64 @@ RUN set -eux; \
     # 提取生成的二进制文件
     exe=""; \
     for f in /out/bdinfo/*; do \
-        if [ -f "$f" ] && [ -x "$f" ] &&[ "${f##*.}" != "dll" ] && [ "${f##*.}" != "json" ] &&[ "${f##*.}" != "pdb" ]; then \
-            exe="$f"; break; \
-        fi; \
+        [ -f "$f" ] || continue; \
+        [ -x "$f" ] || continue; \
+        case "${f##*.}" in \
+            dll|json|pdb) continue ;; \
+        esac; \
+        exe="$f"; \
+        break; \
     done; \
     if [ -n "$exe" ]; then \
-        mv "$exe" /out/bdinfo/BDInfo; \
+        if [ "$exe" != "/out/bdinfo/BDInfo" ]; then \
+            mv "$exe" /out/bdinfo/BDInfo; \
+        fi; \
     else \
         echo "BDInfo executable not found" >&2; exit 1; \
     fi; \
     chmod +x /out/bdinfo/BDInfo; \
     find /out/bdinfo -type f \( -name '*.pdb' -o -name '*.xml' -o -name '*.dbg' \) -delete
 
-# 构建 BD/DVD 元数据 helper
-FROM --platform=$TARGETPLATFORM alpine:3.19 AS media-helper-build
-RUN apk add --no-cache build-base
+# 构建 BD 元数据 helper
+FROM alpine:${ALPINE_VERSION} AS media-helper-build
 WORKDIR /src
+RUN apk add --no-cache build-base
 COPY tools/bdsub_probe.c ./tools/bdsub_probe.c
 RUN mkdir -p /out && \
     cc -O2 -Wall -Wextra -std=c11 ./tools/bdsub_probe.c -o /out/bdsub
 
 # 最终运行环境 (Alpine)
-FROM alpine:3.19 AS runtime
+FROM alpine:${ALPINE_VERSION} AS runtime
+ARG ALPINE_EDGE_REPO
+ARG FFMPEG_PKG
 ARG TARGETARCH
-RUN apk add --no-cache \
-    ca-certificates \
-    curl \
-    ffmpeg \
-    mediainfo \
-    pngquant \
-    fontconfig \
-    font-noto-cjk \
-    kmod \
-    libgdiplus \
-    findutils \
-    util-linux \
-    libstdc++ \
-    libgcc \
-    tzdata \
-    bash \
-    jq \
-    bc \
-    file \
-    coreutils
+RUN set -eux; \
+    printf '%s\n%s\n' "${ALPINE_EDGE_REPO}/main" "${ALPINE_EDGE_REPO}/community" > /etc/apk/repositories; \
+    apk add --no-cache \
+        ca-certificates \
+        curl \
+        "$FFMPEG_PKG" \
+        mediainfo \
+        fontconfig \
+        font-noto-cjk \
+        kmod \
+        libgdiplus \
+        findutils \
+        util-linux \
+        libstdc++ \
+        libgcc \
+        tzdata \
+        bash \
+        jq \
+        bc \
+        file \
+        coreutils; \
+    printf '#!/bin/sh\nexec "$@"\n' > /usr/local/bin/sudo; \
+    chmod +x /usr/local/bin/sudo
 
 COPY third_party/nconvert/ /opt/minfo/third_party/nconvert/
 COPY scripts/install-nconvert.sh /usr/local/bin/install-nconvert
-
-RUN set -eux; \
-    printf '#!/bin/sh\nexec "$@"\n' > /usr/local/bin/sudo; \
-    chmod +x /usr/local/bin/sudo /usr/local/bin/install-nconvert; \
+RUN chmod +x /usr/local/bin/install-nconvert && \
     if [ "$TARGETARCH" = "amd64" ] && [ -f /opt/minfo/third_party/nconvert/nconvert ]; then /usr/local/bin/install-nconvert /opt/minfo/third_party/nconvert/nconvert /usr/local/bin/nconvert; fi
 
 COPY --from=build /out/minfo /usr/local/bin/minfo
@@ -123,28 +134,30 @@ ENTRYPOINT ["/usr/local/bin/minfo"]
 
 # 本地调试环境 (Go + Delve + 运行依赖)
 FROM golang:${GO_VERSION}-alpine AS debug
+ARG ALPINE_EDGE_REPO
+ARG FFMPEG_PKG
 ARG TARGETARCH
-RUN apk add --no-cache \
-    ca-certificates \
-    curl \
-    ffmpeg \
-    mediainfo \
-    pngquant \
-    fontconfig \
-    font-noto-cjk \
-    kmod \
-    libgdiplus \
-    findutils \
-    util-linux \
-    libstdc++ \
-    libgcc \
-    tzdata \
-    bash \
-    jq \
-    bc \
-    file \
-    coreutils
-
+RUN set -eux; \
+    printf '%s\n%s\n' "${ALPINE_EDGE_REPO}/main" "${ALPINE_EDGE_REPO}/community" > /etc/apk/repositories; \
+    apk add --no-cache \
+        ca-certificates \
+        curl \
+        "$FFMPEG_PKG" \
+        mediainfo \
+        fontconfig \
+        font-noto-cjk \
+        kmod \
+        libgdiplus \
+        findutils \
+        util-linux \
+        libstdc++ \
+        libgcc \
+        tzdata \
+        bash \
+        jq \
+        bc \
+        file \
+        coreutils
 RUN GOBIN=/usr/local/bin go install github.com/go-delve/delve/cmd/dlv@latest
 
 COPY third_party/nconvert/ /opt/minfo/third_party/nconvert/

@@ -76,13 +76,15 @@ func NormalizeVariant(raw string) string {
 	}
 }
 
-// NormalizeSubtitleMode 规范化字幕模式；off 和 none 类输入会关闭字幕，其余值使用自动模式。
+// NormalizeSubtitleMode 规范化字幕模式；默认关闭字幕。
 func NormalizeSubtitleMode(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case SubtitleModeOff, "none", "nosub", "false", "0":
+	case SubtitleModeAuto:
+		return SubtitleModeAuto
+	case SubtitleModeOff, "none", "nosub", "false", "0", "":
 		return SubtitleModeOff
 	default:
-		return SubtitleModeAuto
+		return SubtitleModeOff
 	}
 }
 
@@ -145,7 +147,7 @@ func RunUploadWithLiveLogs(ctx context.Context, inputPath, outputDir, variant, s
 	return runPixhostUploadWithLiveLogs(ctx, inputPath, outputDir, variant, subtitleMode, count, onLog)
 }
 
-// randomScreenshotTimestampsForSource 针对已经解析好的媒体源生成随机截图时间点。
+// randomScreenshotTimestampsForSource 针对已经解析好的媒体源生成截图时间点。
 func randomScreenshotTimestampsForSource(ctx context.Context, sourcePath string, count int) ([]string, error) {
 	count = normalizeCountValue(count)
 
@@ -159,7 +161,7 @@ func randomScreenshotTimestampsForSource(ctx context.Context, sourcePath string,
 		return nil, err
 	}
 
-	seconds := buildRandomTimestampSeconds(duration, count)
+	seconds := buildFixedStepTimestampSeconds(duration, count)
 	timestamps := make([]string, 0, len(seconds))
 	for _, second := range seconds {
 		timestamps = append(timestamps, formatTimestamp(second))
@@ -422,66 +424,53 @@ func accumulateDVDPacketDuration(packets []ffprobePacket, startOffset, discontin
 	return total, true
 }
 
-// buildRandomTimestampSeconds 在媒体时长范围内按分段随机的方式生成截图秒数。
-func buildRandomTimestampSeconds(duration float64, count int) []int {
+// buildFixedStepTimestampSeconds 根据片长使用固定步长生成截图时间点。
+func buildFixedStepTimestampSeconds(duration float64, count int) []int {
 	count = normalizeCountValue(count)
-
-	start := 0.0
-	end := duration
-	if duration > 120 {
-		margin := duration * 0.08
-		if margin < 15 {
-			margin = 15
-		}
-		if margin > 300 {
-			margin = 300
-		}
-		start = margin
-		end = duration - margin
-		if end <= start {
-			start = 0
-			end = duration
-		}
+	totalSeconds := int(math.Round(duration))
+	if totalSeconds <= 0 {
+		return []int{1}
 	}
 
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	step := (end - start) / float64(count)
-	if step <= 0 {
-		step = duration / float64(count+1)
+	step := 21
+	switch {
+	case totalSeconds >= 3600:
+		step = 331
+	case totalSeconds >= 1500:
+		step = 121
+	case totalSeconds >= 600:
+		step = 71
+	default:
+		step = 21
 	}
 
 	values := make([]int, 0, count)
-	used := make(map[int]struct{}, count)
-	for index := 0; index < count; index++ {
-		segmentStart := start + step*float64(index)
-		segmentEnd := segmentStart + step
-		if index == count-1 || segmentEnd > end {
-			segmentEnd = end
+	current := 0
+	maxSecond := maxInt(totalSeconds-1, 1)
+	for len(values) < count {
+		current += step
+		if current > maxSecond {
+			current = maxSecond
 		}
-		if segmentEnd <= segmentStart {
-			segmentEnd = segmentStart + 1
+		if len(values) > 0 && current <= values[len(values)-1] {
+			current = minInt(values[len(values)-1]+1, maxSecond)
 		}
-
-		value := int(segmentStart + rng.Float64()*(segmentEnd-segmentStart))
-		if value < 0 {
-			value = 0
+		values = append(values, current)
+		if current >= maxSecond {
+			break
 		}
-		maxSecond := int(duration)
-		if maxSecond > 0 && value >= maxSecond {
-			value = maxSecond - 1
-		}
-		for try := 0; try < 8; try++ {
-			if _, exists := used[value]; !exists {
-				break
-			}
-			value++
-		}
-		used[value] = struct{}{}
-		values = append(values, value)
 	}
-
-	sort.Ints(values)
+	for len(values) < count {
+		values = append(values, maxSecond)
+	}
 	return values
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // normalizeCountValue 规范化内部使用的截图数量。

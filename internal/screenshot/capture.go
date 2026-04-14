@@ -7,11 +7,13 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"minfo/internal/config"
 	"minfo/internal/system"
 )
 
@@ -31,13 +33,22 @@ func (r *screenshotRunner) captureScreenshot(aligned float64, path string) error
 	}
 
 	sizeMB := float64(info.Size()) / 1024.0 / 1024.0
-	if r.variant != VariantJPG {
-		r.logf("[提示] %s 大小 %.2fMB，直接使用调色板 PNG 压缩...", filepath.Base(path), sizeMB)
-		r.compressOversizedPNGIfNeeded(path, path)
-		return nil
+	if r.variant == VariantPNG {
+		r.logf("[提示] %s 大小 %.2fMB，超过 10MB，开始压缩...", filepath.Base(path), sizeMB)
+		if err := r.compressScreenshotIfConfigured(path); err != nil {
+			r.logf("[警告] PNG 压缩失败，保留原始截图：%s", err.Error())
+		}
+		info, err = os.Stat(path)
+		if err == nil && info.Size() <= oversizeBytes {
+			return nil
+		}
 	}
 
-	r.logf("[提示] %s 大小 %.2fMB，重拍降低质量...", filepath.Base(path), sizeMB)
+	if r.variant != VariantJPG {
+		r.logf("[提示] %s 压缩后仍超过 10MB，重拍并映射到 SDR...", filepath.Base(path))
+	} else {
+		r.logf("[提示] %s 大小 %.2fMB，重拍降低质量...", filepath.Base(path), sizeMB)
+	}
 	tempPath := path + ".tmp" + r.settings.Ext
 	r.activeRenderPhase = "reencode"
 	if err := r.captureReencoded(aligned, tempPath); err != nil {
@@ -51,70 +62,89 @@ func (r *screenshotRunner) captureScreenshot(aligned float64, path string) error
 		return err
 	}
 	r.activeRenderPhase = "render"
+	if r.variant == VariantPNG {
+		if err := r.compressScreenshotIfConfigured(path); err != nil {
+			r.logf("[警告] PNG 压缩失败，保留重拍截图：%s", err.Error())
+		}
+	}
 	return nil
 }
 
-func (r *screenshotRunner) compressOversizedPNGIfNeeded(tempPath, finalPath string) {
-	info, err := os.Stat(tempPath)
-	if err != nil || info.Size() <= oversizeBytes {
-		return
+func (r *screenshotRunner) compressScreenshotIfConfigured(path string) error {
+	if r.variant != VariantPNG {
+		return nil
+	}
+	if !config.BoolFromEnv("SCREENSHOT_PNG_COMPRESS_ENABLED", true) {
+		return nil
 	}
 
-	beforeMB := float64(info.Size()) / 1024.0 / 1024.0
-	r.logf("[提示] %s 重拍后仍为 %.2fMB，继续使用调色板 PNG 压缩...", filepath.Base(finalPath), beforeMB)
-
-	if err := r.compressAggressivePNG(tempPath); err != nil {
-		r.logf("[警告] %s 调色板 PNG 压缩失败，保留当前重拍结果：%s", filepath.Base(finalPath), err.Error())
-		return
+	if runtime.GOARCH == "arm64" || strings.HasPrefix(runtime.GOARCH, "arm") {
+		return r.compressScreenshotWithPNGQuant(path)
 	}
-
-	afterInfo, err := os.Stat(tempPath)
-	if err != nil {
-		return
-	}
-
-	afterMB := float64(afterInfo.Size()) / 1024.0 / 1024.0
-	if afterInfo.Size() > oversizeBytes {
-		r.logf("[警告] %s 调色板 PNG 压缩后仍为 %.2fMB，图床上传可能跳过该文件。", filepath.Base(finalPath), afterMB)
-		return
-	}
-
-	r.logf("[信息] %s 调色板 PNG 压缩后大小 %.2fMB。", filepath.Base(finalPath), afterMB)
+	return r.compressScreenshotWithNConvert(path)
 }
 
-func (r *screenshotRunner) compressAggressivePNG(path string) error {
-	compressedPath := path + ".pal.png"
-	_ = os.Remove(compressedPath)
-
-	args := buildAggressivePNGCompressionArgs(path, compressedPath)
-	stdout, stderr, err := system.RunCommand(r.ctx, r.ffmpegBin, args...)
-	if err != nil {
-		_ = os.Remove(compressedPath)
-		return fmt.Errorf(system.BestErrorMessage(err, stderr, stdout))
+func (r *screenshotRunner) compressScreenshotWithNConvert(path string) error {
+	if strings.TrimSpace(r.nconvertBin) == "" {
+		return nil
+	}
+	if !config.BoolFromEnv("SCREENSHOT_NCONVERT_ENABLED", true) {
+		return nil
 	}
 
-	if err := os.Rename(compressedPath, path); err != nil {
-		_ = os.Remove(compressedPath)
+	level := config.IntFromEnv("SCREENSHOT_NCONVERT_LEVEL", 6, 0, 9)
+	tempPath := strings.TrimSuffix(path, filepath.Ext(path)) + "_1.png"
+	stdout, stderr, err := system.RunCommand(r.ctx, r.nconvertBin,
+		"-out", "png",
+		"-clevel", strconv.Itoa(level),
+		"-o", tempPath,
+		path,
+	)
+	if err != nil {
+		_ = os.Remove(tempPath)
+		return fmt.Errorf(system.BestErrorMessage(err, stderr, stdout))
+	}
+	if _, statErr := os.Stat(tempPath); statErr != nil {
+		return fmt.Errorf("nconvert did not create output: %w", statErr)
+	}
+	beforeInfo, beforeErr := os.Stat(path)
+	afterInfo, afterErr := os.Stat(tempPath)
+	if beforeErr == nil && afterErr == nil {
+		beforeMB := float64(beforeInfo.Size()) / 1024.0 / 1024.0
+		afterMB := float64(afterInfo.Size()) / 1024.0 / 1024.0
+		r.logf("[信息] nconvert PNG 压缩完成：%s %.2fMB -> %.2fMB (clevel=%d)", filepath.Base(path), beforeMB, afterMB, level)
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		_ = os.Remove(tempPath)
 		return err
 	}
 	return nil
 }
 
-func buildAggressivePNGCompressionArgs(inputPath, outputPath string) []string {
-	filter := "[0:v]split[p][v];[p]palettegen=stats_mode=single:max_colors=256[pal];[v][pal]paletteuse=new=1:dither=sierra2_4a[out]"
-	return []string{
-		"-v", "error",
-		"-i", inputPath,
-		"-filter_complex", filter,
-		"-map", "[out]",
-		"-frames:v", "1",
-		"-pix_fmt", "pal8",
-		"-c:v", "png",
-		"-compression_level", "9",
-		"-pred", "mixed",
-		"-y",
-		outputPath,
+func (r *screenshotRunner) compressScreenshotWithPNGQuant(path string) error {
+	if strings.TrimSpace(r.pngquantBin) == "" {
+		return nil
 	}
+	level := config.IntFromEnv("SCREENSHOT_PNGQUANT_QUALITY_MIN", 65, 0, 100)
+	maxLevel := config.IntFromEnv("SCREENSHOT_PNGQUANT_QUALITY_MAX", 90, 0, 100)
+	if level > maxLevel {
+		level, maxLevel = maxLevel, level
+	}
+	stdout, stderr, err := system.RunCommand(r.ctx, r.pngquantBin,
+		"--force",
+		"--skip-if-larger",
+		"--quality", fmt.Sprintf("%d-%d", level, maxLevel),
+		"--ext", ".png",
+		path,
+	)
+	if err != nil {
+		return fmt.Errorf(system.BestErrorMessage(err, stderr, stdout))
+	}
+	if info, statErr := os.Stat(path); statErr == nil {
+		mb := float64(info.Size()) / 1024.0 / 1024.0
+		r.logf("[信息] pngquant PNG 压缩完成：%s 当前大小 %.2fMB (quality=%d-%d)", filepath.Base(path), mb, level, maxLevel)
+	}
+	return nil
 }
 
 // bitmapSubtitleVisibleAt 判断当前内部位图字幕在给定时间点是否真的可见。
@@ -768,10 +798,17 @@ func (r *screenshotRunner) activeRenderProgressLabel() string {
 
 // displayAspectFilter 返回当前截图任务应使用的显示宽高比修正过滤器链。
 func (r *screenshotRunner) displayAspectFilter() string {
-	if strings.TrimSpace(r.aspectChain) != "" {
-		return r.aspectChain
+	filters := make([]string, 0, 2)
+	if r.trueWidth > 0 && r.trueHeight > 0 {
+		filters = append(filters, fmt.Sprintf("scale=%d:%d", r.trueWidth, r.trueHeight))
 	}
-	return buildDisplayAspectFilter()
+	if strings.TrimSpace(r.aspectChain) != "" {
+		filters = append(filters, r.aspectChain)
+	}
+	if len(filters) == 0 {
+		return buildDisplayAspectFilter()
+	}
+	return joinFilters(filters...)
 }
 
 func normalizeRenderProgressWindow(seconds float64) float64 {

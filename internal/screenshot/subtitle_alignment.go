@@ -152,6 +152,76 @@ func (r *screenshotRunner) detectVideoDimensions() (int, int) {
 	return width, height
 }
 
+// detectTrueResolution 根据宽高与 PAR/DAR 计算更接近真实显示尺寸的分辨率。
+func (r *screenshotRunner) detectTrueResolution(width, height int) (int, int) {
+	if width <= 0 || height <= 0 {
+		return 0, 0
+	}
+
+	sar := ""
+	dar := ""
+	stdout, _, err := system.RunCommand(r.ctx, r.ffprobeBin,
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=sample_aspect_ratio,display_aspect_ratio",
+		"-of", "default=noprint_wrappers=1",
+		r.sourcePath,
+	)
+	if err == nil {
+		for _, line := range strings.Split(stdout, "\n") {
+			line = strings.TrimSpace(line)
+			switch {
+			case strings.HasPrefix(line, "sample_aspect_ratio="):
+				sar = strings.TrimSpace(strings.TrimPrefix(line, "sample_aspect_ratio="))
+			case strings.HasPrefix(line, "display_aspect_ratio="):
+				dar = strings.TrimSpace(strings.TrimPrefix(line, "display_aspect_ratio="))
+			}
+		}
+	}
+
+	parValue := 1.0
+	if num, den, ok := parseAspectRatio(sar); ok && den > 0 {
+		parValue = float64(num) / float64(den)
+	} else if value, ok := parseAspectRatioValue(sar); ok && value > 0 {
+		parValue = value
+	}
+	if math.Abs(parValue-1.002) < 0.0005 || math.Abs(parValue-1.004) < 0.0005 {
+		parValue = 1
+	}
+	if parValue <= 0 {
+		parValue = 1
+	}
+
+	trueWidth := width
+	trueHeight := height
+	if parValue <= 1.0 {
+		candidate := int(float64(height) / parValue)
+		if candidate > 0 {
+			if candidate%2 != 0 {
+				candidate++
+			}
+			trueHeight = candidate
+		}
+	} else {
+		candidate := int(float64(width) * parValue)
+		if candidate > 0 {
+			if candidate%2 != 0 {
+				candidate++
+			}
+			trueWidth = candidate
+		}
+	}
+
+	if strings.TrimSpace(dar) != "" {
+		r.logf("[信息] 显示比例：DAR=%s | PAR=%.4f | 视频分辨率=%dx%d -> %dx%d",
+			dar, parValue, width, height, trueWidth, trueHeight)
+	} else {
+		r.logf("[信息] 像素比例：PAR=%.4f | 视频分辨率=%dx%d -> %dx%d",
+			parValue, width, height, trueWidth, trueHeight)
+	}
+	return trueWidth, trueHeight
+}
+
 // detectColorspace 读取视频流的色彩空间元数据，并整理成稳定键值。
 func (r *screenshotRunner) detectColorspace() string {
 	stdout, _, err := system.RunCommand(r.ctx, r.ffprobeBin,
