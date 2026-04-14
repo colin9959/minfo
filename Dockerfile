@@ -77,6 +77,7 @@ RUN mkdir -p /out && \
 
 # 最终运行环境 (Alpine)
 FROM alpine:3.19 AS runtime
+ARG TARGETARCH
 RUN apk add --no-cache \
     ca-certificates \
     curl \
@@ -104,7 +105,7 @@ COPY scripts/install-nconvert.sh /usr/local/bin/install-nconvert
 RUN set -eux; \
     printf '#!/bin/sh\nexec "$@"\n' > /usr/local/bin/sudo; \
     chmod +x /usr/local/bin/sudo /usr/local/bin/install-nconvert; \
-    if [ -f /opt/minfo/third_party/nconvert/nconvert ]; then /usr/local/bin/install-nconvert /opt/minfo/third_party/nconvert/nconvert /usr/local/bin/nconvert; fi
+    if [ "$TARGETARCH" = "amd64" ] && [ -f /opt/minfo/third_party/nconvert/nconvert ]; then /usr/local/bin/install-nconvert /opt/minfo/third_party/nconvert/nconvert /usr/local/bin/nconvert; fi
 
 COPY --from=build /out/minfo /usr/local/bin/minfo
 COPY --from=bdinfo-build /out/bdinfo/BDInfo /usr/local/bin/bdinfo
@@ -122,6 +123,7 @@ ENTRYPOINT ["/usr/local/bin/minfo"]
 
 # 本地调试环境 (Go + Delve + 运行依赖)
 FROM golang:${GO_VERSION}-alpine AS debug
+ARG TARGETARCH
 RUN apk add --no-cache \
     ca-certificates \
     curl \
@@ -153,7 +155,7 @@ COPY --from=runtime /usr/local/bin/bdsub /usr/local/bin/bdsub
 COPY --from=runtime /usr/local/bin/sudo /usr/local/bin/sudo
 
 RUN chmod +x /usr/local/bin/dlv /usr/local/bin/bdinfo /usr/local/bin/bdsub /usr/local/bin/sudo /usr/local/bin/install-nconvert && \
-    if [ -f /opt/minfo/third_party/nconvert/nconvert ]; then /usr/local/bin/install-nconvert /opt/minfo/third_party/nconvert/nconvert /usr/local/bin/nconvert; fi
+    if [ "$TARGETARCH" = "amd64" ] && [ -f /opt/minfo/third_party/nconvert/nconvert ]; then /usr/local/bin/install-nconvert /opt/minfo/third_party/nconvert/nconvert /usr/local/bin/nconvert; fi
 
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
