@@ -5,6 +5,7 @@ package config
 import (
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -44,4 +45,38 @@ func DurationFromEnv(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return duration
+}
+
+// BoolFromEnv 解析布尔环境变量；为空或非法时返回 fallback。
+func BoolFromEnv(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		log.Printf("invalid %s=%q; fallback to %t", key, value, fallback)
+		return fallback
+	}
+	return parsed
+}
+
+// IntFromEnv 解析整数环境变量，并可选限制在 min/max 范围内。
+func IntFromEnv(key string, fallback, min, max int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		log.Printf("invalid %s=%q; fallback to %d", key, value, fallback)
+		return fallback
+	}
+	if parsed < min {
+		return min
+	}
+	if parsed > max {
+		return max
+	}
+	return parsed
 }

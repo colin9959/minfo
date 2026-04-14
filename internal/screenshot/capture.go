@@ -7,9 +7,11 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
+	"minfo/internal/config"
 	"minfo/internal/system"
 )
 
@@ -17,6 +19,10 @@ import (
 func (r *screenshotRunner) captureScreenshot(aligned float64, path string) error {
 	if err := r.capturePrimary(aligned, path); err != nil {
 		return err
+	}
+
+	if err := r.compressScreenshotIfConfigured(path); err != nil {
+		r.logf("[警告] PNG 压缩失败，保留当前截图：%s", err.Error())
 	}
 
 	info, err := os.Stat(path)
@@ -43,6 +49,9 @@ func (r *screenshotRunner) captureScreenshot(aligned float64, path string) error
 	if err := os.Rename(tempPath, path); err != nil {
 		_ = os.Remove(tempPath)
 		return err
+	}
+	if err := r.compressScreenshotIfConfigured(path); err != nil {
+		r.logf("[警告] PNG 压缩失败，保留重拍截图：%s", err.Error())
 	}
 	return nil
 }
@@ -410,6 +419,91 @@ func (r *screenshotRunner) runFFmpeg(args []string) error {
 	stdout, stderr, err := system.RunCommand(r.ctx, r.ffmpegBin, args...)
 	if err != nil {
 		return fmt.Errorf(system.BestErrorMessage(err, stderr, stdout))
+	}
+	return nil
+}
+
+func (r *screenshotRunner) compressScreenshotIfConfigured(path string) error {
+	if r.variant != VariantPNG {
+		return nil
+	}
+	if !config.BoolFromEnv("SCREENSHOT_PNG_COMPRESS_ENABLED", true) {
+		return nil
+	}
+
+	if runtime.GOARCH == "arm64" || strings.HasPrefix(runtime.GOARCH, "arm") {
+		return r.compressScreenshotWithPNGQuant(path)
+	}
+	return r.compressScreenshotWithNConvert(path)
+}
+
+func (r *screenshotRunner) compressScreenshotWithNConvert(path string) error {
+	if strings.TrimSpace(r.nconvertBin) == "" {
+		return nil
+	}
+	if !config.BoolFromEnv("SCREENSHOT_NCONVERT_ENABLED", true) {
+		return nil
+	}
+
+	level := config.IntFromEnv("SCREENSHOT_NCONVERT_LEVEL", 6, 0, 9)
+	tempPath := strings.TrimSuffix(path, filepath.Ext(path)) + "_1.png"
+	stdout, stderr, err := system.RunCommand(r.ctx, r.nconvertBin,
+		"-out", "png",
+		"-clevel", strconv.Itoa(level),
+		"-o", tempPath,
+		path,
+	)
+	if err != nil {
+		_ = os.Remove(tempPath)
+		return fmt.Errorf(system.BestErrorMessage(err, stderr, stdout))
+	}
+	if _, statErr := os.Stat(tempPath); statErr != nil {
+		return fmt.Errorf("nconvert did not create output: %w", statErr)
+	}
+
+	beforeInfo, beforeErr := os.Stat(path)
+	afterInfo, afterErr := os.Stat(tempPath)
+	if beforeErr == nil && afterErr == nil {
+		beforeMB := float64(beforeInfo.Size()) / 1024.0 / 1024.0
+		afterMB := float64(afterInfo.Size()) / 1024.0 / 1024.0
+		r.logf("[信息] nconvert PNG 压缩完成：%s %.2fMB -> %.2fMB (clevel=%d)", filepath.Base(path), beforeMB, afterMB, level)
+	} else {
+		r.logf("[信息] nconvert PNG 压缩完成：%s (clevel=%d)", filepath.Base(path), level)
+	}
+
+	if err := os.Rename(tempPath, path); err != nil {
+		_ = os.Remove(tempPath)
+		return err
+	}
+	return nil
+}
+
+func (r *screenshotRunner) compressScreenshotWithPNGQuant(path string) error {
+	if strings.TrimSpace(r.pngquantBin) == "" {
+		return nil
+	}
+	level := config.IntFromEnv("SCREENSHOT_PNGQUANT_QUALITY_MIN", 65, 0, 100)
+	maxLevel := config.IntFromEnv("SCREENSHOT_PNGQUANT_QUALITY_MAX", 90, 0, 100)
+	if level > maxLevel {
+		level, maxLevel = maxLevel, level
+	}
+
+	stdout, stderr, err := system.RunCommand(r.ctx, r.pngquantBin,
+		"--force",
+		"--skip-if-larger",
+		"--quality", fmt.Sprintf("%d-%d", level, maxLevel),
+		"--ext", ".png",
+		path,
+	)
+	if err != nil {
+		return fmt.Errorf(system.BestErrorMessage(err, stderr, stdout))
+	}
+
+	if info, statErr := os.Stat(path); statErr == nil {
+		mb := float64(info.Size()) / 1024.0 / 1024.0
+		r.logf("[信息] pngquant PNG 压缩完成：%s 当前大小 %.2fMB (quality=%d-%d)", filepath.Base(path), mb, level, maxLevel)
+	} else {
+		r.logf("[信息] pngquant PNG 压缩完成：%s (quality=%d-%d)", filepath.Base(path), level, maxLevel)
 	}
 	return nil
 }

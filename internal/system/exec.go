@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -19,6 +20,8 @@ const (
 	MediaInfoBinaryPath = "/usr/bin/mediainfo"
 	BDInfoBinaryPath    = "/usr/local/bin/bdinfo"
 	BDSubBinaryPath     = "/usr/local/bin/bdsub"
+	NConvertBinaryPath  = "/usr/local/bin/nconvert"
+	PNGQuantBinaryPath  = "/usr/local/bin/pngquant"
 	MountBinaryPath     = "/bin/mount"
 	UmountBinaryPath    = "/bin/umount"
 	ModprobeBinaryPath  = "/sbin/modprobe"
@@ -30,6 +33,22 @@ func ResolveBin(path string) (string, error) {
 		return "", fmt.Errorf("%s not found", path)
 	}
 	return path, nil
+}
+
+// ResolveOptionalBin 会优先校验固定路径；若缺失则尝试按可执行文件名在 PATH 中查找。
+func ResolveOptionalBin(path string) (string, error) {
+	if resolved, err := ResolveBin(path); err == nil {
+		return resolved, nil
+	}
+	name := filepath.Base(strings.TrimSpace(path))
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		return "", fmt.Errorf("%s not found", path)
+	}
+	resolved, err := exec.LookPath(name)
+	if err != nil {
+		return "", fmt.Errorf("%s not found", path)
+	}
+	return resolved, nil
 }
 
 // RunCommand 会在默认工作目录中执行外部命令，并返回完整 stdout、stderr 和错误状态。
