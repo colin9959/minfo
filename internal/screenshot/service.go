@@ -8,14 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"minfo/internal/system"
 )
@@ -472,6 +470,7 @@ func minInt(a, b int) int {
 	}
 	return b
 }
+const maxInt = 100
 
 // normalizeCountValue 规范化内部使用的截图数量。
 func normalizeCountValue(count int) int {
