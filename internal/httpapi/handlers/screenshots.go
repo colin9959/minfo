@@ -117,7 +117,7 @@ func handleScreenshotsPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := writeScreenshotZipResponse(ctx, w, path, tempDir, variant, subtitleMode, count); err != nil {
+	if err := writeScreenshotZipResponse(ctx, w, path, tempDir, variant, subtitleMode, captureMode, count); err != nil {
 		transport.WriteError(w, http.StatusInternalServerError, err.Error())
 	}
 }
@@ -138,6 +138,7 @@ func handleScreenshotZipDownload(w http.ResponseWriter, r *http.Request) {
 	defer cleanup()
 	variant := screenshot.NormalizeVariant(r.URL.Query().Get("variant"))
 	subtitleMode := screenshot.NormalizeSubtitleMode(r.URL.Query().Get("subtitle_mode"))
+	captureMode := screenshot.NormalizeCaptureMode(r.URL.Query().Get("capture_mode"))
 	count := screenshot.NormalizeCount(r.URL.Query().Get("count"))
 
 	ctx, cancel := context.WithTimeout(r.Context(), config.RequestTimeout)
@@ -150,7 +151,7 @@ func handleScreenshotZipDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	if err := writeScreenshotZipResponse(ctx, w, path, tempDir, variant, subtitleMode, count); err != nil {
+	if err := writeScreenshotZipResponse(ctx, w, path, tempDir, variant, subtitleMode, captureMode, count); err != nil {
 		transport.WriteError(w, http.StatusInternalServerError, err.Error())
 	}
 }
