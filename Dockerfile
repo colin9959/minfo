@@ -96,6 +96,7 @@ RUN set -eux; \
         curl \
         "$FFMPEG_PKG" \
         mediainfo \
+        pngquant \
         fontconfig \
         font-noto-cjk \
         kmod \
@@ -139,6 +140,7 @@ RUN set -eux; \
         curl \
         "$FFMPEG_PKG" \
         mediainfo \
+        pngquant \
         fontconfig \
         font-noto-cjk \
         kmod \
