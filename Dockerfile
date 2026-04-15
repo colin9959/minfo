@@ -94,8 +94,6 @@ RUN set -eux; \
     apk add --no-cache \
         ca-certificates \
         curl \
-        gcompat \
-        libc6-compat \
         "$FFMPEG_PKG" \
         mediainfo \
         fontconfig \
@@ -114,11 +112,6 @@ RUN set -eux; \
         coreutils; \
     printf '#!/bin/sh\nexec "$@"\n' > /usr/local/bin/sudo; \
     chmod +x /usr/local/bin/sudo
-
-COPY third_party/nconvert/ /opt/minfo/third_party/nconvert/
-COPY scripts/install-nconvert.sh /usr/local/bin/install-nconvert
-RUN chmod +x /usr/local/bin/install-nconvert && \
-    if [ "$TARGETARCH" = "amd64" ] && [ -f /opt/minfo/third_party/nconvert/nconvert ]; then /usr/local/bin/install-nconvert /opt/minfo/third_party/nconvert/nconvert /usr/local/bin/nconvert; fi
 
 COPY --from=build /out/minfo /usr/local/bin/minfo
 COPY --from=bdinfo-build /out/bdinfo/BDInfo /usr/local/bin/bdinfo
@@ -144,8 +137,6 @@ RUN set -eux; \
     apk add --no-cache \
         ca-certificates \
         curl \
-        gcompat \
-        libc6-compat \
         "$FFMPEG_PKG" \
         mediainfo \
         fontconfig \
@@ -164,15 +155,10 @@ RUN set -eux; \
         coreutils
 RUN GOBIN=/usr/local/bin go install github.com/go-delve/delve/cmd/dlv@latest
 
-COPY third_party/nconvert/ /opt/minfo/third_party/nconvert/
-COPY scripts/install-nconvert.sh /usr/local/bin/install-nconvert
-
 COPY --from=runtime /usr/local/bin/bdinfo /usr/local/bin/bdinfo
 COPY --from=runtime /usr/local/bin/bdsub /usr/local/bin/bdsub
 COPY --from=runtime /usr/local/bin/sudo /usr/local/bin/sudo
 
-RUN chmod +x /usr/local/bin/dlv /usr/local/bin/bdinfo /usr/local/bin/bdsub /usr/local/bin/sudo /usr/local/bin/install-nconvert && \
-    if [ "$TARGETARCH" = "amd64" ] && [ -f /opt/minfo/third_party/nconvert/nconvert ]; then /usr/local/bin/install-nconvert /opt/minfo/third_party/nconvert/nconvert /usr/local/bin/nconvert; fi
 
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8

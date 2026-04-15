@@ -20,7 +20,6 @@ const (
 	MediaInfoBinaryPath = "/usr/bin/mediainfo"
 	BDInfoBinaryPath    = "/usr/local/bin/bdinfo"
 	BDSubBinaryPath     = "/usr/local/bin/bdsub"
-	NConvertBinaryPath  = "/usr/local/bin/nconvert"
 	PNGQuantBinaryPath  = "/usr/local/bin/pngquant"
 	MountBinaryPath     = "/bin/mount"
 	UmountBinaryPath    = "/bin/umount"

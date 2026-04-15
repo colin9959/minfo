@@ -7,7 +7,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,7 +33,7 @@ func (r *screenshotRunner) captureScreenshot(aligned float64, path string) error
 
 	sizeMB := float64(info.Size()) / 1024.0 / 1024.0
 	if r.variant == VariantPNG {
-		r.logf("[提示] %s 大小 %.2fMB，超过 10MB，开始压缩...", filepath.Base(path), sizeMB)
+		r.logf("[提示] %s 大小 %.2fMB，超过阈值，开始使用 pngquant 压缩...", filepath.Base(path), sizeMB)
 		if err := r.compressScreenshotIfConfigured(path); err != nil {
 			r.logf("[警告] PNG 压缩失败，保留原始截图：%s", err.Error())
 		}
@@ -45,7 +44,7 @@ func (r *screenshotRunner) captureScreenshot(aligned float64, path string) error
 	}
 
 	if r.variant != VariantJPG {
-		r.logf("[提示] %s 压缩后仍超过 10MB，重拍并映射到 SDR...", filepath.Base(path))
+		r.logf("[提示] %s 压缩后仍超过阈值，重拍输出...", filepath.Base(path))
 	} else {
 		r.logf("[提示] %s 大小 %.2fMB，重拍降低质量...", filepath.Base(path), sizeMB)
 	}
@@ -77,48 +76,7 @@ func (r *screenshotRunner) compressScreenshotIfConfigured(path string) error {
 	if !config.BoolFromEnv("SCREENSHOT_PNG_COMPRESS_ENABLED", true) {
 		return nil
 	}
-
-	if runtime.GOARCH == "arm64" || strings.HasPrefix(runtime.GOARCH, "arm") {
-		return r.compressScreenshotWithPNGQuant(path)
-	}
-	return r.compressScreenshotWithNConvert(path)
-}
-
-func (r *screenshotRunner) compressScreenshotWithNConvert(path string) error {
-	if strings.TrimSpace(r.nconvertBin) == "" {
-		return nil
-	}
-	if !config.BoolFromEnv("SCREENSHOT_NCONVERT_ENABLED", true) {
-		return nil
-	}
-
-	level := config.IntFromEnv("SCREENSHOT_NCONVERT_LEVEL", 6, 0, 9)
-	tempPath := strings.TrimSuffix(path, filepath.Ext(path)) + "_1.png"
-	stdout, stderr, err := system.RunCommand(r.ctx, r.nconvertBin,
-		"-out", "png",
-		"-clevel", strconv.Itoa(level),
-		"-o", tempPath,
-		path,
-	)
-	if err != nil {
-		_ = os.Remove(tempPath)
-		return fmt.Errorf(system.BestErrorMessage(err, stderr, stdout))
-	}
-	if _, statErr := os.Stat(tempPath); statErr != nil {
-		return fmt.Errorf("nconvert did not create output: %w", statErr)
-	}
-	beforeInfo, beforeErr := os.Stat(path)
-	afterInfo, afterErr := os.Stat(tempPath)
-	if beforeErr == nil && afterErr == nil {
-		beforeMB := float64(beforeInfo.Size()) / 1024.0 / 1024.0
-		afterMB := float64(afterInfo.Size()) / 1024.0 / 1024.0
-		r.logf("[信息] nconvert PNG 压缩完成：%s %.2fMB -> %.2fMB (clevel=%d)", filepath.Base(path), beforeMB, afterMB, level)
-	}
-	if err := os.Rename(tempPath, path); err != nil {
-		_ = os.Remove(tempPath)
-		return err
-	}
-	return nil
+	return r.compressScreenshotWithPNGQuant(path)
 }
 
 func (r *screenshotRunner) compressScreenshotWithPNGQuant(path string) error {
@@ -246,7 +204,6 @@ func (r *screenshotRunner) captureDVDPrimary(coarseHMS string, fineSecond float6
 func (r *screenshotRunner) captureInternalBitmapPrimary(coarseHMS string, fineSecond float64, path string) error {
 	filterComplex := joinFilters(
 		fmt.Sprintf("[0:v:0][0:s:%d]overlay=(W-w)/2:(H-h-10)", r.subtitle.RelativeIndex),
-		r.colorChain,
 		r.displayAspectFilter(),
 	)
 	args := []string{
@@ -293,14 +250,13 @@ func (r *screenshotRunner) capturePrimary(aligned float64, path string) error {
 	}
 
 	frameSelect := fmt.Sprintf("setpts=PTS-STARTPTS,select='gte(t,%s)'", formatFloat(fineSecond))
-	filterChain := joinFilters(frameSelect, r.colorChain, r.displayAspectFilter())
+	filterChain := joinFilters(frameSelect, r.displayAspectFilter())
 
 	if subFilter := r.buildTextSubtitleFilter(); subFilter != "" {
 		filterChain = joinFilters(
 			frameSelect,
 			fmt.Sprintf("setpts=PTS-STARTPTS+%s/TB", formatFloat(aligned)),
 			subFilter,
-			r.colorChain,
 		)
 	}
 
@@ -350,13 +306,12 @@ func (r *screenshotRunner) capturePNGReencoded(aligned float64, path string) err
 	}
 
 	frameSelect := fmt.Sprintf("setpts=PTS-STARTPTS,select='gte(t,%s)'", formatFloat(fineSecond))
-	filterChain := joinFilters(frameSelect, r.colorChain, r.displayAspectFilter())
+	filterChain := joinFilters(frameSelect, r.displayAspectFilter())
 	if subFilter := r.buildTextSubtitleFilter(); subFilter != "" {
 		filterChain = joinFilters(
 			frameSelect,
 			fmt.Sprintf("setpts=PTS-STARTPTS+%s/TB", formatFloat(aligned)),
 			subFilter,
-			r.colorChain,
 		)
 	}
 
@@ -393,7 +348,6 @@ func (r *screenshotRunner) captureDVDPNGReencoded(coarseHMS string, fineSecond f
 func (r *screenshotRunner) captureInternalBitmapPNGReencoded(coarseHMS string, fineSecond float64, path string) error {
 	filterComplex := joinFilters(
 		fmt.Sprintf("[0:v:0][0:s:%d]overlay=(W-w)/2:(H-h-10)", r.subtitle.RelativeIndex),
-		r.colorChain,
 		r.displayAspectFilter(),
 	)
 	args := []string{
@@ -438,13 +392,12 @@ func (r *screenshotRunner) captureJPGReencoded(aligned float64, path string) err
 	}
 
 	frameSelect := fmt.Sprintf("setpts=PTS-STARTPTS,select='gte(t,%s)'", formatFloat(fineSecond))
-	filterChain := joinFilters(frameSelect, r.colorChain, r.displayAspectFilter())
+	filterChain := joinFilters(frameSelect, r.displayAspectFilter())
 	if subFilter := r.buildTextSubtitleFilter(); subFilter != "" {
 		filterChain = joinFilters(
 			frameSelect,
 			fmt.Sprintf("setpts=PTS-STARTPTS+%s/TB", formatFloat(aligned)),
 			subFilter,
-			r.colorChain,
 		)
 	}
 
@@ -480,7 +433,6 @@ func (r *screenshotRunner) captureDVDJPGReencoded(coarseHMS string, fineSecond f
 func (r *screenshotRunner) captureInternalBitmapJPGReencoded(coarseHMS string, fineSecond float64, quality int, path string) error {
 	filterComplex := joinFilters(
 		fmt.Sprintf("[0:v:0][0:s:%d]overlay=(W-w)/2:(H-h-10)", r.subtitle.RelativeIndex),
-		r.colorChain,
 		r.displayAspectFilter(),
 	)
 	args := []string{

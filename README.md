@@ -66,41 +66,17 @@ docker compose up -d
 
 - `PORT`：Web 服务监听端口，默认 `28080`
 - `REQUEST_TIMEOUT`：单次请求超时时间，默认 `20m`
-- `SCREENSHOT_NCONVERT_ENABLED`：是否在 x86 / x86_64 平台的 PNG 截图后尝试调用 `nconvert` 二次压缩，默认 `true`
-- `SCREENSHOT_NCONVERT_LEVEL`：`nconvert -clevel` 压缩级别，范围 `0-9`，默认 `6`
 - `SCREENSHOT_PNG_COMPRESS_ENABLED`：是否启用 PNG 二次压缩总开关，默认 `true`
-- `SCREENSHOT_PNGQUANT_QUALITY_MIN`：ARM 平台调用 `pngquant` 时的最小质量，默认 `65`
-- `SCREENSHOT_PNGQUANT_QUALITY_MAX`：ARM 平台调用 `pngquant` 时的最大质量，默认 `90`
+- `SCREENSHOT_PNGQUANT_QUALITY_MIN`：调用 `pngquant` 时的最小质量，默认 `65`
+- `SCREENSHOT_PNGQUANT_QUALITY_MAX`：调用 `pngquant` 时的最大质量，默认 `90`
 
 ## 截图策略调整
 
 - 默认不挂载字幕（除非后续明确启用）
 - 截图时间点按影片时长使用固定步长生成
 - 单张 PNG 截图只有在 **大于 10MB** 时才会触发压缩
-- **x86 / x86_64**：优先使用内置 `nconvert`
-- **ARM / ARM64**：使用 `pngquant`
+- 所有架构统一使用 `pngquant` 进行 PNG 压缩
 
-## nconvert 集成
-
-本仓库支持把 `nconvert` 作为可选第三方二进制一并打包，用于对 PNG 截图做额外压缩。
-
-放置路径：
-
-```text
-third_party/nconvert/nconvert
-```
-
-安装方式：
-
-```bash
-sh scripts/install-nconvert.sh
-```
-
-Docker 构建时若检测到 `third_party/nconvert/nconvert` 存在，且目标架构为 `amd64`，会自动安装到：
-
-```text
-/usr/local/bin/nconvert
-```
 
 ## 许可证
 
