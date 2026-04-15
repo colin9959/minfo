@@ -1,4 +1,4 @@
-# minfo
+# minfo-这是mirrorb/minfo的一个分支
 
 `minfo` 是一个面向本地媒体资源的 Web 工具，支持生成 `MediaInfo`、`BDInfo`，以及截图和上传图床。
 
@@ -27,14 +27,14 @@
 
 ## 部署方式
 
-直接使用已发布镜像 `ghcr.io/mirrorb/minfo:latest`。
+直接使用已发布镜像 `ghcr.io/colin9959/minfo:latest`。
 
 示例 `docker-compose.yml`：
 
 ```yaml
 services:
   minfo:
-    image: ghcr.io/mirrorb/minfo:latest
+    image: ghcr.io/colin9959/minfo:latest
     container_name: minfo
     privileged: true
     ports:
