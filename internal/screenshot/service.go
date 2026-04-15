@@ -470,11 +470,12 @@ func minInt(a, b int) int {
 	}
 	return b
 }
+
 func maxInt(a, b int) int {
-    if a > b {
-        return a
-    }
-    return b
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // normalizeCountValue 规范化内部使用的截图数量。
