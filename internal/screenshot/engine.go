@@ -148,6 +148,7 @@ type screenshotRunner struct {
 	outputDir        string
 	variant          string
 	subtitleMode     string
+	captureMode      string
 	requested        []float64
 	settings         variantSettings
 	ffmpegBin        string
@@ -181,7 +182,7 @@ type screenshotRunner struct {
 }
 
 // runEngineScreenshotsWithLiveLogs 会解析输入源、生成随机时间点，并启动带实时日志的截图引擎流程。
-func runEngineScreenshotsWithLiveLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int, onLog LogHandler) (ScreenshotsResult, error) {
+func runEngineScreenshotsWithLiveLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode, captureMode string, count int, onLog LogHandler) (ScreenshotsResult, error) {
 	sourcePath, cleanup, err := media.ResolveScreenshotSource(ctx, inputPath)
 	if err != nil {
 		return ScreenshotsResult{}, err
@@ -200,11 +201,11 @@ func runEngineScreenshotsWithLiveLogs(ctx context.Context, inputPath, outputDir,
 		return ScreenshotsResult{}, err
 	}
 
-	return runScreenshotsFromSource(ctx, sourcePath, dvdMediaInfoPath, outputDir, variant, subtitleMode, timestamps, onLog)
+	return runScreenshotsFromSource(ctx, sourcePath, dvdMediaInfoPath, outputDir, variant, subtitleMode, captureMode, timestamps, onLog)
 }
 
 // runScreenshotsFromSource 会基于已经解析好的媒体源创建运行器，并执行一次完整截图任务。
-func runScreenshotsFromSource(ctx context.Context, sourcePath, dvdMediaInfoPath, outputDir, variant, subtitleMode string, timestamps []string, onLog LogHandler) (ScreenshotsResult, error) {
+func runScreenshotsFromSource(ctx context.Context, sourcePath, dvdMediaInfoPath, outputDir, variant, subtitleMode, captureMode string, timestamps []string, onLog LogHandler) (ScreenshotsResult, error) {
 	runner := &screenshotRunner{
 		ctx:              ctx,
 		sourcePath:       sourcePath,
@@ -212,6 +213,7 @@ func runScreenshotsFromSource(ctx context.Context, sourcePath, dvdMediaInfoPath,
 		outputDir:        outputDir,
 		variant:          NormalizeVariant(variant),
 		subtitleMode:     NormalizeSubtitleMode(subtitleMode),
+		captureMode:      NormalizeCaptureMode(captureMode),
 		settings:         variantSettingsFor(variant),
 		subtitle: subtitleSelection{
 			Mode: "none",
@@ -299,6 +301,13 @@ func (r *screenshotRunner) init(timestamps []string) error {
 	}
 	if err := clearDir(r.outputDir); err != nil {
 		return err
+	}
+
+	if r.captureMode == CaptureModeFast {
+		r.subtitleMode = SubtitleModeOff
+		r.logf("[信息] 当前截图模式：快速模式（关闭字幕/对齐，优先速度）。")
+	} else {
+		r.logf("[信息] 当前截图模式：标准模式（精确取帧）。")
 	}
 
 	r.startOffset = r.detectStartOffset()

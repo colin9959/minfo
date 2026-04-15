@@ -37,6 +37,9 @@ const (
 
 	SubtitleModeAuto = "auto"
 	SubtitleModeOff  = "off"
+
+	CaptureModeStandard = "standard"
+	CaptureModeFast     = "fast"
 )
 
 // ScreenshotsResult 表示一次截图流程返回的文件列表和日志。
@@ -86,6 +89,16 @@ func NormalizeSubtitleMode(raw string) string {
 	}
 }
 
+// NormalizeCaptureMode 规范化截图执行模式；默认标准模式。
+func NormalizeCaptureMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case CaptureModeFast:
+		return CaptureModeFast
+	default:
+		return CaptureModeStandard
+	}
+}
+
 // NormalizeCount 规范化截图数量，并限制在允许范围内。
 func NormalizeCount(raw string) int {
 	value := strings.TrimSpace(raw)
@@ -108,8 +121,8 @@ func NormalizeCount(raw string) int {
 }
 
 // RunScreenshots 执行截图流程并仅返回生成的文件列表。
-func RunScreenshots(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int) ([]string, error) {
-	result, err := RunScreenshotsWithLogs(ctx, inputPath, outputDir, variant, subtitleMode, count)
+func RunScreenshots(ctx context.Context, inputPath, outputDir, variant, subtitleMode, captureMode string, count int) ([]string, error) {
+	result, err := RunScreenshotsWithLogs(ctx, inputPath, outputDir, variant, subtitleMode, captureMode, count)
 	if err != nil {
 		return nil, err
 	}
@@ -117,18 +130,18 @@ func RunScreenshots(ctx context.Context, inputPath, outputDir, variant, subtitle
 }
 
 // RunScreenshotsWithLogs 执行截图流程并返回文件列表与完整日志。
-func RunScreenshotsWithLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int) (ScreenshotsResult, error) {
-	return RunScreenshotsWithLiveLogs(ctx, inputPath, outputDir, variant, subtitleMode, count, nil)
+func RunScreenshotsWithLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode, captureMode string, count int) (ScreenshotsResult, error) {
+	return RunScreenshotsWithLiveLogs(ctx, inputPath, outputDir, variant, subtitleMode, captureMode, count, nil)
 }
 
 // RunScreenshotsWithLiveLogs 会执行截图流程，并把实时日志通过回调逐行暴露给调用方。
-func RunScreenshotsWithLiveLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int, onLog LogHandler) (ScreenshotsResult, error) {
-	return runEngineScreenshotsWithLiveLogs(ctx, inputPath, outputDir, variant, subtitleMode, count, onLog)
+func RunScreenshotsWithLiveLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode, captureMode string, count int, onLog LogHandler) (ScreenshotsResult, error) {
+	return runEngineScreenshotsWithLiveLogs(ctx, inputPath, outputDir, variant, subtitleMode, captureMode, count, onLog)
 }
 
 // RunUpload 执行截图加上传流程并仅返回直链输出。
-func RunUpload(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int) (string, error) {
-	result, err := RunUploadWithLogs(ctx, inputPath, outputDir, variant, subtitleMode, count)
+func RunUpload(ctx context.Context, inputPath, outputDir, variant, subtitleMode, captureMode string, count int) (string, error) {
+	result, err := RunUploadWithLogs(ctx, inputPath, outputDir, variant, subtitleMode, captureMode, count)
 	if err != nil {
 		return "", err
 	}
@@ -136,13 +149,13 @@ func RunUpload(ctx context.Context, inputPath, outputDir, variant, subtitleMode 
 }
 
 // RunUploadWithLogs 执行截图加上传流程并返回直链输出与完整日志。
-func RunUploadWithLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int) (UploadResult, error) {
-	return RunUploadWithLiveLogs(ctx, inputPath, outputDir, variant, subtitleMode, count, nil)
+func RunUploadWithLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode, captureMode string, count int) (UploadResult, error) {
+	return RunUploadWithLiveLogs(ctx, inputPath, outputDir, variant, subtitleMode, captureMode, count, nil)
 }
 
 // RunUploadWithLiveLogs 会执行截图加上传流程，并把实时日志通过回调逐行暴露给调用方。
-func RunUploadWithLiveLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int, onLog LogHandler) (UploadResult, error) {
-	return runPixhostUploadWithLiveLogs(ctx, inputPath, outputDir, variant, subtitleMode, count, onLog)
+func RunUploadWithLiveLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode, captureMode string, count int, onLog LogHandler) (UploadResult, error) {
+	return runPixhostUploadWithLiveLogs(ctx, inputPath, outputDir, variant, subtitleMode, captureMode, count, onLog)
 }
 
 // randomScreenshotTimestampsForSource 针对已经解析好的媒体源生成截图时间点。

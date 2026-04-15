@@ -147,45 +147,6 @@ func TestNormalizeRenderProgressWindow(t *testing.T) {
 	}
 }
 
-func TestBuildColorspaceChainForHDR(t *testing.T) {
-	info := "color_primaries=bt2020|color_space=bt2020nc|color_transfer=smpte2084|"
-	chain := buildColorspaceChain(info)
-
-	if !strings.Contains(chain, "zscale=t=linear:npl=203") {
-		t.Fatalf("expected HDR colorspace chain to raise nominal peak luminance, got %q", chain)
-	}
-	if !strings.Contains(chain, "tonemap=mobius") {
-		t.Fatalf("expected HDR colorspace chain to include tone mapping, got %q", chain)
-	}
-	if !strings.Contains(chain, "tonemap=mobius:param=0.3:desat=2.0,zscale=p=bt709:t=bt709:m=bt709") {
-		t.Fatalf("expected HDR colorspace chain to tonemap before bt709 conversion, got %q", chain)
-	}
-	if strings.Contains(chain, "zscale=p=bt709:t=bt709,tonemap=mobius") {
-		t.Fatalf("expected HDR colorspace chain to avoid bt709 conversion before tonemap, got %q", chain)
-	}
-}
-
-func TestBuildColorspaceChainForBT2020SDR(t *testing.T) {
-	info := "color_primaries=bt2020|color_space=bt2020nc|color_transfer=bt709|"
-	chain := buildColorspaceChain(info)
-
-	if !strings.Contains(chain, "zscale=p=bt709:t=bt709:m=bt709") {
-		t.Fatalf("expected HDR colorspace chain to map to bt709, got %q", chain)
-	}
-	if strings.Contains(chain, "scale=in_color_matrix=bt2020:out_color_matrix=bt709") {
-		t.Fatalf("expected BT.2020 SDR colorspace chain to avoid scale matrix-only conversion, got %q", chain)
-	}
-}
-
-func TestBuildColorspaceChainForSDR(t *testing.T) {
-	info := "color_primaries=bt709|color_space=bt709|color_transfer=bt709|"
-	chain := buildColorspaceChain(info)
-
-	if chain != "" {
-		t.Fatalf("expected SDR colorspace chain to be empty, got %q", chain)
-	}
-}
-
 func TestBuildDisplayAspectFilterForMetadataUsesDARForAnamorphicDVD(t *testing.T) {
 	filter := buildDisplayAspectFilterForMetadata(720, 480, "32:27", "16:9")
 	if filter != "scale='trunc(ih*16/9/2)*2:ih',setsar=1" {
@@ -221,17 +182,3 @@ func TestNormalizeMediaInfoAspectRatioMapsCommonFullscreenValue(t *testing.T) {
 	}
 }
 
-func TestBuildAggressivePNGCompressionArgs(t *testing.T) {
-	args := buildAggressivePNGCompressionArgs("/tmp/input.png", "/tmp/output.png")
-	joined := strings.Join(args, " ")
-
-	if !strings.Contains(joined, "palettegen=stats_mode=single:max_colors=256") {
-		t.Fatalf("expected palettegen in aggressive PNG args, got %q", joined)
-	}
-	if !strings.Contains(joined, "paletteuse=new=1:dither=sierra2_4a") {
-		t.Fatalf("expected paletteuse in aggressive PNG args, got %q", joined)
-	}
-	if !strings.Contains(joined, "-pix_fmt pal8") {
-		t.Fatalf("expected pal8 output in aggressive PNG args, got %q", joined)
-	}
-}

@@ -225,6 +225,9 @@ func (r *screenshotRunner) captureInternalBitmapPrimary(coarseHMS string, fineSe
 
 // capturePrimary 执行首选截图路径，并根据字幕类型选择对应的渲染方案。
 func (r *screenshotRunner) capturePrimary(aligned float64, path string) error {
+	if r.captureMode == CaptureModeFast {
+		return r.captureFast(aligned, path)
+	}
 	if r.subtitle.Mode == "external" {
 		if _, err := os.Stat(r.subtitle.File); err != nil {
 			return fmt.Errorf("subtitle file not found before render: %w", err)
@@ -275,6 +278,23 @@ func (r *screenshotRunner) capturePrimary(aligned float64, path string) error {
 	args = append(args, r.primaryOutputArgs()...)
 	args = append(args, path)
 	return r.runFFmpeg(args, fineSecond)
+}
+
+func (r *screenshotRunner) captureFast(aligned float64, path string) error {
+	args := []string{
+		"-v", "error",
+		"-ss", formatFloat(aligned),
+		"-i", r.sourcePath,
+		"-map", "0:v:0",
+		"-frames:v", "1",
+		"-y",
+	}
+	if r.trueWidth > 0 && r.trueHeight > 0 {
+		args = append(args, "-vf", fmt.Sprintf("scale=%d:%d", r.trueWidth, r.trueHeight))
+	}
+	args = append(args, r.primaryOutputArgs()...)
+	args = append(args, path)
+	return r.runFFmpeg(args, 0.25)
 }
 
 // captureReencoded 在原始截图过大时用更保守的编码参数重新截图。

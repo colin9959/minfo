@@ -6,6 +6,7 @@ const DEFAULT_STATE = {
     screenshotVariant: "png",
     screenshotSubtitleMode: "auto",
     screenshotCount: 4,
+    screenshotCaptureMode: "standard",
     bdinfoMode: "code",
 };
 
@@ -85,6 +86,7 @@ function normalizeState(value) {
         screenshotVariant: normalizeVariant(source.screenshotVariant),
         screenshotSubtitleMode: normalizeSubtitleMode(source.screenshotSubtitleMode),
         screenshotCount: normalizeScreenshotCount(source.screenshotCount),
+        screenshotCaptureMode: normalizeCaptureMode(source.screenshotCaptureMode),
         bdinfoMode: normalizeBDInfoMode(source.bdinfoMode),
     };
 }
@@ -137,6 +139,10 @@ function normalizeTaskAction(value) {
 
 function normalizeTaskPanel(value) {
     return value === "output" || value === "links" ? value : "";
+}
+
+function normalizeCaptureMode(value) {
+    return value === "fast" ? "fast" : DEFAULT_STATE.screenshotCaptureMode;
 }
 
 function normalizeSubtitleMode(value) {

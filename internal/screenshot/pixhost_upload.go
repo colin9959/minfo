@@ -31,8 +31,8 @@ type pixhostResponse struct {
 }
 
 // runPixhostUploadWithLiveLogs 会先生成截图，再把图片上传到 Pixhost，并合并两阶段日志。
-func runPixhostUploadWithLiveLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode string, count int, onLog LogHandler) (UploadResult, error) {
-	screenshotResult, err := runEngineScreenshotsWithLiveLogs(ctx, inputPath, outputDir, variant, subtitleMode, count, onLog)
+func runPixhostUploadWithLiveLogs(ctx context.Context, inputPath, outputDir, variant, subtitleMode, captureMode string, count int, onLog LogHandler) (UploadResult, error) {
+	screenshotResult, err := runEngineScreenshotsWithLiveLogs(ctx, inputPath, outputDir, variant, subtitleMode, captureMode, count, onLog)
 	if err != nil {
 		return UploadResult{Logs: screenshotResult.Logs}, err
 	}

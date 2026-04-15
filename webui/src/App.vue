@@ -35,6 +35,10 @@
                         <BDInfoOutputPicker v-model="bdinfoMode" :busy="busy" />
                     </div>
                     <div class="field">
+                        <label class="field-label-muted">截图速度</label>
+                        <ScreenshotCaptureModePicker v-model="screenshotCaptureMode" :busy="busy" />
+                    </div>
+                    <div class="field">
                         <label class="field-label-muted">字幕处理</label>
                         <ScreenshotSubtitleModePicker v-model="screenshotSubtitleMode" :busy="busy" />
                     </div>
@@ -116,6 +120,7 @@ import ImageLinksPanel from "./components/ImageLinksPanel.vue";
 import NoticeToast from "./components/NoticeToast.vue";
 import OutputPanel from "./components/OutputPanel.vue";
 import PathBrowser from "./components/PathBrowser.vue";
+import ScreenshotCaptureModePicker from "./components/ScreenshotCaptureModePicker.vue";
 import ScreenshotSubtitleModePicker from "./components/ScreenshotSubtitleModePicker.vue";
 import ScreenshotVariantPicker from "./components/ScreenshotVariantPicker.vue";
 import { useMediaActions } from "./composables/useMediaActions";
@@ -130,12 +135,13 @@ const persistedState = loadAppState();
 const screenshotVariant = ref(persistedState.screenshotVariant);
 const screenshotSubtitleMode = ref(persistedState.screenshotSubtitleMode);
 const screenshotCount = ref(persistedState.screenshotCount);
+const screenshotCaptureMode = ref(persistedState.screenshotCaptureMode);
 const bdinfoMode = ref(persistedState.bdinfoMode);
 const pathBrowser = usePathBrowser({
     initialPath: persistedState.path,
     initialBrowserDir: persistedState.browserDir,
 });
-const mediaActions = useMediaActions(pathBrowser.path, screenshotVariant, screenshotSubtitleMode, screenshotCount, pathBrowser.hasInput);
+const mediaActions = useMediaActions(pathBrowser.path, screenshotVariant, screenshotSubtitleMode, screenshotCount, screenshotCaptureMode, pathBrowser.hasInput);
 
 const clampScreenshotCount = (value) => {
     const parsed = Number.parseInt(`${value ?? ""}`.trim(), 10);
@@ -205,14 +211,15 @@ const {
 } = mediaActions;
 
 watch(
-    [path, browserDir, screenshotVariant, screenshotSubtitleMode, screenshotCount, bdinfoMode],
-    ([nextPath, nextBrowserDir, nextVariant, nextSubtitleMode, nextScreenshotCount, nextBDInfoMode]) => {
+    [path, browserDir, screenshotVariant, screenshotSubtitleMode, screenshotCount, screenshotCaptureMode, bdinfoMode],
+    ([nextPath, nextBrowserDir, nextVariant, nextSubtitleMode, nextScreenshotCount, nextCaptureMode, nextBDInfoMode]) => {
         saveAppState({
             path: nextPath,
             browserDir: nextBrowserDir,
             screenshotVariant: nextVariant,
             screenshotSubtitleMode: nextSubtitleMode,
             screenshotCount: nextScreenshotCount,
+            screenshotCaptureMode: nextCaptureMode,
             bdinfoMode: nextBDInfoMode,
         });
     },

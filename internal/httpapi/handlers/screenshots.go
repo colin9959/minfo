@@ -59,6 +59,7 @@ func handleScreenshotsPost(w http.ResponseWriter, r *http.Request) {
 	mode := screenshot.NormalizeMode(r.FormValue("mode"))
 	variant := screenshot.NormalizeVariant(r.FormValue("variant"))
 	subtitleMode := screenshot.NormalizeSubtitleMode(r.FormValue("subtitle_mode"))
+	captureMode := screenshot.NormalizeCaptureMode(r.FormValue("capture_mode"))
 	count := screenshot.NormalizeCount(r.FormValue("count"))
 
 	ctx, cancel := context.WithTimeout(r.Context(), config.RequestTimeout)
@@ -77,7 +78,7 @@ func handleScreenshotsPost(w http.ResponseWriter, r *http.Request) {
 	defer os.RemoveAll(tempDir)
 
 	if mode == screenshot.ModeLinks {
-		result, err := screenshot.RunUploadWithLiveLogs(ctx, path, tempDir, variant, subtitleMode, count, logger.LogLine)
+		result, err := screenshot.RunUploadWithLiveLogs(ctx, path, tempDir, variant, subtitleMode, captureMode, count, logger.LogLine)
 		if err != nil {
 			transport.WriteJSON(w, http.StatusInternalServerError, transport.InfoResponse{
 				OK:         false,
@@ -97,7 +98,7 @@ func handleScreenshotsPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if shouldPrepareDownload(r) {
-		downloadURL, logs, err := prepareScreenshotZipDownload(ctx, path, tempDir, variant, subtitleMode, count, logger.LogLine)
+		downloadURL, logs, err := prepareScreenshotZipDownload(ctx, path, tempDir, variant, subtitleMode, captureMode, count, logger.LogLine)
 		if err != nil {
 			transport.WriteJSON(w, http.StatusInternalServerError, transport.InfoResponse{
 				OK:         false,
@@ -160,8 +161,8 @@ func shouldPrepareDownload(r *http.Request) bool {
 }
 
 // prepareScreenshotZipDownload 生成截图压缩包并保存到临时下载缓存，返回可复用的下载地址。
-func prepareScreenshotZipDownload(ctx context.Context, path, tempDir, variant, subtitleMode string, count int, onLog screenshot.LogHandler) (string, string, error) {
-	zipBytes, logs, err := generateScreenshotZip(ctx, path, tempDir, variant, subtitleMode, count, onLog)
+func prepareScreenshotZipDownload(ctx context.Context, path, tempDir, variant, subtitleMode, captureMode string, count int, onLog screenshot.LogHandler) (string, string, error) {
+	zipBytes, logs, err := generateScreenshotZip(ctx, path, tempDir, variant, subtitleMode, captureMode, count, onLog)
 	if err != nil {
 		return "", logs, err
 	}
@@ -175,8 +176,8 @@ func prepareScreenshotZipDownload(ctx context.Context, path, tempDir, variant, s
 }
 
 // writeScreenshotZipResponse 生成截图压缩包并直接以附件形式写回响应。
-func writeScreenshotZipResponse(ctx context.Context, w http.ResponseWriter, path, tempDir, variant, subtitleMode string, count int) error {
-	zipBytes, _, err := generateScreenshotZip(ctx, path, tempDir, variant, subtitleMode, count, nil)
+func writeScreenshotZipResponse(ctx context.Context, w http.ResponseWriter, path, tempDir, variant, subtitleMode, captureMode string, count int) error {
+	zipBytes, _, err := generateScreenshotZip(ctx, path, tempDir, variant, subtitleMode, captureMode, count, nil)
 	if err != nil {
 		return err
 	}
@@ -191,8 +192,8 @@ func writeScreenshotZipResponse(ctx context.Context, w http.ResponseWriter, path
 }
 
 // generateScreenshotZip 运行截图流程并将输出文件打包成 ZIP 数据。
-func generateScreenshotZip(ctx context.Context, path, tempDir, variant, subtitleMode string, count int, onLog screenshot.LogHandler) ([]byte, string, error) {
-	result, err := screenshot.RunScreenshotsWithLiveLogs(ctx, path, tempDir, variant, subtitleMode, count, onLog)
+func generateScreenshotZip(ctx context.Context, path, tempDir, variant, subtitleMode, captureMode string, count int, onLog screenshot.LogHandler) ([]byte, string, error) {
+	result, err := screenshot.RunScreenshotsWithLiveLogs(ctx, path, tempDir, variant, subtitleMode, captureMode, count, onLog)
 	if err != nil {
 		return nil, result.Logs, err
 	}

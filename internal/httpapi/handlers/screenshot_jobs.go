@@ -44,6 +44,7 @@ type screenshotJob struct {
 	inputPath    string
 	variant      string
 	subtitleMode string
+	captureMode  string
 	count        int
 	status       string
 	output       string
@@ -80,9 +81,10 @@ func ScreenshotJobsHandler(w http.ResponseWriter, r *http.Request) {
 	mode := screenshot.NormalizeMode(r.FormValue("mode"))
 	variant := screenshot.NormalizeVariant(r.FormValue("variant"))
 	subtitleMode := screenshot.NormalizeSubtitleMode(r.FormValue("subtitle_mode"))
+	captureMode := screenshot.NormalizeCaptureMode(r.FormValue("capture_mode"))
 	count := screenshot.NormalizeCount(r.FormValue("count"))
 
-	job, err := createScreenshotJob(mode, inputPath, cleanup, variant, subtitleMode, count)
+	job, err := createScreenshotJob(mode, inputPath, cleanup, variant, subtitleMode, captureMode, count)
 	if err != nil {
 		if cleanup != nil {
 			cleanup()
@@ -148,7 +150,7 @@ func parseScreenshotJobID(r *http.Request) string {
 }
 
 // createScreenshotJob 会创建一个新的截图后台任务，并立即启动后台执行流程。
-func createScreenshotJob(mode, inputPath string, cleanup func(), variant, subtitleMode string, count int) (*screenshotJob, error) {
+func createScreenshotJob(mode, inputPath string, cleanup func(), variant, subtitleMode, captureMode string, count int) (*screenshotJob, error) {
 	pruneScreenshotJobs(time.Now())
 
 	jobID, err := buildScreenshotJobID()
@@ -164,6 +166,7 @@ func createScreenshotJob(mode, inputPath string, cleanup func(), variant, subtit
 		inputPath:    inputPath,
 		variant:      variant,
 		subtitleMode: subtitleMode,
+		captureMode:  captureMode,
 		count:        count,
 		status:       screenshotJobStatusPending,
 		createdAt:    now,
@@ -242,14 +245,14 @@ func (j *screenshotJob) run() {
 
 	switch j.mode {
 	case screenshot.ModeLinks:
-		result, err := screenshot.RunUploadWithLiveLogs(ctx, j.inputPath, tempDir, j.variant, j.subtitleMode, j.count, j.logger.LogLine)
+		result, err := screenshot.RunUploadWithLiveLogs(ctx, j.inputPath, tempDir, j.variant, j.subtitleMode, j.captureMode, j.count, j.logger.LogLine)
 		if err != nil {
 			j.fail(err)
 			return
 		}
 		j.succeed(result.Output, "")
 	default:
-		downloadURL, _, err := prepareScreenshotZipDownload(ctx, j.inputPath, tempDir, j.variant, j.subtitleMode, j.count, j.logger.LogLine)
+		downloadURL, _, err := prepareScreenshotZipDownload(ctx, j.inputPath, tempDir, j.variant, j.subtitleMode, j.captureMode, j.count, j.logger.LogLine)
 		if err != nil {
 			j.fail(err)
 			return

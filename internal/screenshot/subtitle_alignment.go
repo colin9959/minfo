@@ -222,48 +222,6 @@ func (r *screenshotRunner) detectTrueResolution(width, height int) (int, int) {
 	return trueWidth, trueHeight
 }
 
-// detectColorspace 读取视频流的色彩空间元数据，并整理成稳定键值。
-func (r *screenshotRunner) detectColorspace() string {
-	stdout, _, err := system.RunCommand(r.ctx, r.ffprobeBin,
-		"-v", "error",
-		"-select_streams", "v:0",
-		"-show_entries", "stream=color_space,color_primaries,color_transfer",
-		"-of", "default=noprint_wrappers=1",
-		r.sourcePath,
-	)
-	if err != nil {
-		return ""
-	}
-
-	lines := make([]string, 0, 3)
-	for _, line := range strings.Split(stdout, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "color_space=") || strings.HasPrefix(line, "color_primaries=") || strings.HasPrefix(line, "color_transfer=") {
-			lines = append(lines, line)
-		}
-	}
-	sort.Strings(lines)
-	if len(lines) == 0 {
-		return ""
-	}
-	return strings.Join(lines, "|") + "|"
-}
-
-// buildColorspaceChain 返回 ffmpeg 使用的色彩空间转换过滤器链。
-func buildColorspaceChain(info string) string {
-	switch {
-	case strings.Contains(info, "bt2020") && (strings.Contains(info, "smpte2084") || strings.Contains(info, "arib-std-b67")):
-		return "format=yuv420p10le,zscale=t=linear:npl=203,format=gbrpf32le,tonemap=mobius:param=0.3:desat=2.0,zscale=p=bt709:t=bt709:m=bt709,format=rgb24"
-	case strings.Contains(info, "bt2020"):
-		return "zscale=p=bt709:t=bt709:m=bt709,format=rgb24"
-	default:
-		return ""
-	}
-}
-
 // buildDisplayAspectFilter 会构建显示参数显示比例过滤器，为后续流程准备好可直接使用的结果。
 func buildDisplayAspectFilter() string {
 	// DVD/VOB and other anamorphic sources often use non-square pixels.
