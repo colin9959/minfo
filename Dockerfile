@@ -94,6 +94,8 @@ RUN set -eux; \
     apk add --no-cache \
         ca-certificates \
         curl \
+        gcompat \
+        libc6-compat \
         "$FFMPEG_PKG" \
         mediainfo \
         fontconfig \
@@ -142,6 +144,8 @@ RUN set -eux; \
     apk add --no-cache \
         ca-certificates \
         curl \
+        gcompat \
+        libc6-compat \
         "$FFMPEG_PKG" \
         mediainfo \
         fontconfig \
