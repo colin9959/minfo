@@ -20,7 +20,7 @@ const (
 	defaultSubtitleDuration = 4.0
 	subtitleSnapEpsilon     = 0.50
 	playlistScanMax         = 6
-	oversizeBytes           = 10 * 1024 * 1024
+	oversizeBytes           = 3 * 1024 * 1024
 )
 
 var (
