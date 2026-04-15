@@ -175,31 +175,37 @@ func probeMediaDuration(ctx context.Context, ffprobe, path string) (float64, err
 		}
 	}
 
-	stdout, stderr, err := runFFprobeDuration(ctx, ffprobe, path, "format=duration")
-	if err != nil {
-		return 0, fmt.Errorf("ffprobe format duration probe failed: %s", system.BestErrorMessage(err, stderr, stdout))
-	}
+	problems := make([]string, 0, 3)
 
-	duration, parseErr := parseDurationOutput(stdout)
-	if parseErr == nil {
-		return duration, nil
+	stdout, stderr, err := runFFprobeDuration(ctx, ffprobe, path, "format=duration")
+	if err == nil {
+		duration, parseErr := parseDurationOutput(stdout)
+		if parseErr == nil {
+			return duration, nil
+		}
+		problems = append(problems, fmt.Sprintf("ffprobe format parse failed: %v", parseErr))
+	} else {
+		problems = append(problems, fmt.Sprintf("ffprobe format duration probe failed: %s", system.BestErrorMessage(err, stderr, stdout)))
 	}
 
 	stdout, stderr, err = runFFprobeDuration(ctx, ffprobe, path, "stream=duration")
-	if err != nil {
-		return 0, fmt.Errorf("ffprobe format duration unavailable (%v); stream duration probe failed: %s", parseErr, system.BestErrorMessage(err, stderr, stdout))
-	}
-
-	duration, streamErr := parseDurationOutput(stdout)
-	if streamErr == nil {
-		return duration, nil
+	if err == nil {
+		duration, parseErr := parseDurationOutput(stdout)
+		if parseErr == nil {
+			return duration, nil
+		}
+		problems = append(problems, fmt.Sprintf("ffprobe stream parse failed: %v", parseErr))
+	} else {
+		problems = append(problems, fmt.Sprintf("ffprobe stream duration probe failed: %s", system.BestErrorMessage(err, stderr, stdout)))
 	}
 
 	if duration, mediaErr := probeMediaInfoDuration(ctx, path); mediaErr == nil {
 		return duration, nil
+	} else {
+		problems = append(problems, fmt.Sprintf("mediainfo duration probe failed: %v", mediaErr))
 	}
 
-	return 0, fmt.Errorf("ffprobe returned unusable duration: format probe (%v); stream probe (%v)", parseErr, streamErr)
+	return 0, fmt.Errorf("unable to determine media duration: %s", strings.Join(problems, " | "))
 }
 
 // isDVDTitleVOB 会判断DVD标题VOB是否满足当前条件。
