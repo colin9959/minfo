@@ -304,9 +304,14 @@ func (r *screenshotRunner) init(timestamps []string) error {
 	}
 
 	if r.captureMode == CaptureModeFast {
-		r.subtitleMode = SubtitleModeOff
-		r.logf("[信息] 当前截图模式：快速模式（关闭字幕/对齐，优先速度）。")
-	} else {
+		if r.subtitleMode != SubtitleModeOff {
+			r.captureMode = CaptureModeStandard
+			r.logf("[信息] 已选择挂载字幕：自动切换为标准模式以保证字幕挂载与对齐生效。")
+		} else {
+			r.logf("[信息] 当前截图模式：快速模式（关闭字幕/对齐，优先速度）。")
+		}
+	} 
+	if r.captureMode == CaptureModeStandard {
 		r.logf("[信息] 当前截图模式：标准模式（精确取帧）。")
 	}
 
