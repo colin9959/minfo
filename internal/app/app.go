@@ -14,11 +14,14 @@ import (
 	"minfo/internal/media"
 )
 
-// NewServer 会根据当前配置创建 HTTP Server，并在启动前预加载截图流程依赖的 UDF 模块。
+// NewServer 会根据当前配置创建 HTTP Server，并在启动前预加载截图流程依赖的 loop / UDF 模块。
 func NewServer(staticFS fs.FS) (*http.Server, error) {
 	port := config.Getenv("PORT", config.DefaultPort)
 
 	preloadCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := media.LoadLoopModule(preloadCtx); err != nil {
+		log.Printf("loop auto-load skipped: %v", err)
+	}
 	if err := media.LoadUDFModule(preloadCtx); err != nil {
 		log.Printf("udf auto-load skipped: %v", err)
 	}
