@@ -48,6 +48,11 @@ services:
       - /your/media/path2:/media_path2:ro
     restart: unless-stopped
 ```
+docker run 
+```
+docker run -d --name minfo --privileged -p 28080:28080 -e PORT="28080" -e WEB_USERNAME="admin" -e WEB_PASSWORD="admin123" -e REQUEST_TIMEOUT="20m" -v /lib/modules:/lib/modules:ro -v /your/media/path1:/media_path1:ro --restart unless-stopped ghcr.io/colin9959/minfo:latest
+```
+其中：WEB_USERNAME和WEB_PASSWORD可自定义，/your/media/path1为视频所在目录，可映射多个路径。/lib/modules:/lib/modules:ro为挂载iso映射，保持默认即可。
 
 启动：
 
