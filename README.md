@@ -42,6 +42,8 @@ services:
     environment:
       PORT: "28080"
       REQUEST_TIMEOUT: "20m"
+      WEB_USERNAME: "admin"
+      WEB_PASSWORD: "passpass" # 请修改默认用户名密码
     volumes:
       - /lib/modules:/lib/modules:ro # 用于挂载 ISO，保持默认
       - /your/media/path1:/media_path1:ro
@@ -49,10 +51,10 @@ services:
     restart: unless-stopped
 ```
 docker run 
+```bash
+docker run -d --name minfo --privileged -p 28080:28080 -e PORT="28080" -e WEB_USERNAME="admin" -e WEB_PASSWORD="passpass" -e REQUEST_TIMEOUT="20m" -v /lib/modules:/lib/modules:ro -v /your/media/path1:/media_path1:ro --restart unless-stopped ghcr.io/colin9959/minfo:latest
 ```
-docker run -d --name minfo --privileged -p 28080:28080 -e PORT="28080" -e WEB_USERNAME="admin" -e WEB_PASSWORD="admin123" -e REQUEST_TIMEOUT="20m" -v /lib/modules:/lib/modules:ro -v /your/media/path1:/media_path1:ro --restart unless-stopped ghcr.io/colin9959/minfo:latest
-```
-其中：WEB_USERNAME和WEB_PASSWORD可自定义，/your/media/path1为视频所在目录，可映射多个路径。/lib/modules:/lib/modules:ro为挂载iso映射，保持默认即可。
+其中：WEB_USERNAME和WEB_PASSWORD为用户名密码可自定义，/your/media/path1为视频所在目录，可映射多个路径。/lib/modules:/lib/modules:ro为挂载iso映射，保持默认即可。
 
 启动：
 
