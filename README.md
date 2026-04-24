@@ -56,11 +56,6 @@ docker run -d --name minfo --privileged -p 28080:28080 -e PORT="28080" -e WEB_US
 ```
 其中：WEB_USERNAME和WEB_PASSWORD为用户名密码可自定义，/your/media/path1为视频所在目录，可映射多个路径。/lib/modules:/lib/modules:ro为挂载iso映射，保持默认即可。
 
-启动：
-
-```bash
-docker compose up -d
-```
 
 ## 运行要求
 
