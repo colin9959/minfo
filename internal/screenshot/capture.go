@@ -288,9 +288,8 @@ func (r *screenshotRunner) capturePrimary(aligned float64, path string) error {
 func (r *screenshotRunner) captureFast(aligned float64, path string) error {
 	// 快速模式：单段 keyframe seek + 丢弃预热帧
 	// -ss 在 -i 前自动使用 keyframe seek（最快），默认 accurate_seek 解码到目标位置
-	// select=gte(n\\,4) 丢弃前 5 帧（解码器预热，B-frame 参考帧尚未就绪），取第 6 帧
-	// 偏移约 4/fps 秒（典型 <0.2s）
-	// 快速编码 compression_level=0 pred=none，若超 10MB 由 ImageMagick 兜底压缩
+	// select=gte(n\\,4) 丢弃前 5 帧（解码器预热避免花屏），取第 6 帧
+	// 直接 ffmpeg PNG level=9 一步到位，远超 10MB 时才走 ImageMagick 兜底
 
 	var filterChain string
 	if r.trueWidth > 0 && r.trueHeight > 0 {
@@ -311,8 +310,8 @@ func (r *screenshotRunner) captureFast(aligned float64, path string) error {
 		"-frames:v", "1",
 		"-y",
 		"-c:v", "png",
-		"-compression_level", "0",
-		"-pred", "none",
+		"-compression_level", "9",
+		"-pred", "mixed",
 		path,
 	}
 	return r.runFFmpeg(args, 0.1)
