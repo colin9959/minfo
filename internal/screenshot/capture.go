@@ -286,28 +286,36 @@ func (r *screenshotRunner) capturePrimary(aligned float64, path string) error {
 }
 
 func (r *screenshotRunner) captureFast(aligned float64, path string) error {
-	// 两段式 seek：先粗跳到 keyframe 附近，再精确定位到目标时间点，避免花屏
-	coarseBack := 300
-	coarseSecond := int(math.Max(math.Floor(aligned)-float64(coarseBack), 0))
-	fineSecond := aligned - float64(coarseSecond)
-	coarseHMS := formatTimestamp(coarseSecond)
+	// 快速模式：单段 keyframe seek + 丢弃预热帧
+	// -ss 在 -i 前自动使用 keyframe seek（最快），默认 accurate_seek 解码到目标位置
+	// select=gte(n\\,4) 丢弃前 5 帧（解码器预热，B-frame 参考帧尚未就绪），取第 6 帧
+	// 偏移约 4/fps 秒（典型 <0.2s）
+	// 快速编码 compression_level=0 pred=none，若超 10MB 由 ImageMagick 兜底压缩
+
+	var filterChain string
+	if r.trueWidth > 0 && r.trueHeight > 0 {
+		filterChain = joinFilters(
+			"select=gte(n\\,4),setpts=N/FRAME_RATE/TB",
+			fmt.Sprintf("scale=%d:%d", r.trueWidth, r.trueHeight),
+		)
+	} else {
+		filterChain = "select=gte(n\\,4),setpts=N/FRAME_RATE/TB"
+	}
 
 	args := []string{
 		"-v", "error",
-		"-fflags", "+genpts",
-		"-ss", coarseHMS,
+		"-ss", formatFloat(aligned),
 		"-i", r.sourcePath,
 		"-map", "0:v:0",
-		"-ss", formatFloat(fineSecond),
+		"-vf", filterChain,
 		"-frames:v", "1",
 		"-y",
+		"-c:v", "png",
+		"-compression_level", "0",
+		"-pred", "none",
+		path,
 	}
-	if r.trueWidth > 0 && r.trueHeight > 0 {
-		args = append(args, "-vf", fmt.Sprintf("scale=%d:%d", r.trueWidth, r.trueHeight))
-	}
-	args = append(args, r.primaryOutputArgs()...)
-	args = append(args, path)
-	return r.runFFmpeg(args, 0.25)
+	return r.runFFmpeg(args, 0.1)
 }
 
 // captureReencoded 在原始截图过大时用更保守的编码参数重新截图。
