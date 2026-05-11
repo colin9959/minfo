@@ -286,11 +286,19 @@ func (r *screenshotRunner) capturePrimary(aligned float64, path string) error {
 }
 
 func (r *screenshotRunner) captureFast(aligned float64, path string) error {
+	// 两段式 seek：先粗跳到 keyframe 附近，再精确定位到目标时间点，避免花屏
+	coarseBack := 300
+	coarseSecond := int(math.Max(math.Floor(aligned)-float64(coarseBack), 0))
+	fineSecond := aligned - float64(coarseSecond)
+	coarseHMS := formatTimestamp(coarseSecond)
+
 	args := []string{
 		"-v", "error",
-		"-ss", formatFloat(aligned),
+		"-fflags", "+genpts",
+		"-ss", coarseHMS,
 		"-i", r.sourcePath,
 		"-map", "0:v:0",
+		"-ss", formatFloat(fineSecond),
 		"-frames:v", "1",
 		"-y",
 	}
