@@ -69,15 +69,14 @@ docker run -d --name minfo --privileged -p 28080:28080 -e PORT="28080" -e WEB_US
 - `PORT`：Web 服务监听端口，默认 `28080`
 - `REQUEST_TIMEOUT`：单次请求超时时间，默认 `20m`
 - `SCREENSHOT_PNG_COMPRESS_ENABLED`：是否启用 PNG 二次压缩总开关，默认 `true`
-- `SCREENSHOT_PNGQUANT_QUALITY_MIN`：调用 `pngquant` 时的最小质量，默认 `65`
-- `SCREENSHOT_PNGQUANT_QUALITY_MAX`：调用 `pngquant` 时的最大质量，默认 `90`
+
 
 ## 截图策略调整
 
 - 快速模式需选择不挂载字幕
 - 截图时间点按影片时长使用固定步长生成
 - 单张 PNG 截图若大于 10MB 会触发压缩
-- 所有架构统一使用 `pngquant` 进行 PNG 压缩
+
 
 
 ## 许可证
