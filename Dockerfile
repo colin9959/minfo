@@ -5,7 +5,7 @@ ARG GO_VERSION=1.26.1
 ARG APP_VERSION=dev
 ARG ALPINE_VERSION=edge
 ARG ALPINE_EDGE_REPO=https://dl-cdn.alpinelinux.org/alpine/edge
-ARG FFMPEG_PKG=ffmpeg=8.1-r0
+ARG FFMPEG_PKG=ffmpeg
 
 # 构建 WebUI
 FROM --platform=$BUILDPLATFORM node:20-alpine AS webui
@@ -96,7 +96,7 @@ RUN set -eux; \
         curl \
         "$FFMPEG_PKG" \
         mediainfo \
-        pngquant \
+        imagemagick \
         fontconfig \
         font-noto-cjk \
         kmod \
@@ -140,7 +140,7 @@ RUN set -eux; \
         curl \
         "$FFMPEG_PKG" \
         mediainfo \
-        pngquant \
+        imagemagick \
         fontconfig \
         font-noto-cjk \
         kmod \
