@@ -92,6 +92,7 @@ func (r *screenshotRunner) compressScreenshotWithImageMagick(path string) error 
 		"-colorspace", "sRGB",
 		"-type", "truecolor",
 		"-depth", "8",
+		"-define", "png:color-type=2",
 		"-define", "png:compression-level=9",
 		"-strip",
 		tempPath,
@@ -104,7 +105,7 @@ func (r *screenshotRunner) compressScreenshotWithImageMagick(path string) error 
 	}
 	if info, statErr := os.Stat(path); statErr == nil {
 		mb := float64(info.Size()) / 1024.0 / 1024.0
-		r.logf("[信息] ImageMagick PNG 压缩完成：%s 当前大小 %.2fMB (truecolor depth=8)", filepath.Base(path), mb)
+		r.logf("[信息] ImageMagick PNG 压缩完成：%s 当前大小 %.2fMB (truecolor color-type=2 depth=8)", filepath.Base(path), mb)
 	}
 	return nil
 }
