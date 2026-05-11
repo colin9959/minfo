@@ -33,9 +33,9 @@ func (r *screenshotRunner) captureScreenshot(aligned float64, path string) error
 
 	sizeMB := float64(info.Size()) / 1024.0 / 1024.0
 	if r.variant == VariantPNG {
-		r.logf("[提示] %s 大小 %.2fMB，超过阈值，开始使用 pngquant 压缩...", filepath.Base(path), sizeMB)
+		r.logf("[提示] %s 大小 %.2fMB，超过阈值，开始使用 ImageMagick convert 压缩...", filepath.Base(path), sizeMB)
 		if err := r.compressScreenshotIfConfigured(path); err != nil {
-			r.logf("[警告] PNG 压缩失败，保留原始截图：%s", err.Error())
+			r.logf("[警告] ImageMagick 压缩失败，保留原始截图：%s", err.Error())
 		}
 		info, err = os.Stat(path)
 		if err == nil && info.Size() <= oversizeBytes {
@@ -76,31 +76,35 @@ func (r *screenshotRunner) compressScreenshotIfConfigured(path string) error {
 	if !config.BoolFromEnv("SCREENSHOT_PNG_COMPRESS_ENABLED", true) {
 		return nil
 	}
-	return r.compressScreenshotWithPNGQuant(path)
+	return r.compressScreenshotWithImageMagick(path)
 }
 
-func (r *screenshotRunner) compressScreenshotWithPNGQuant(path string) error {
-	if strings.TrimSpace(r.pngquantBin) == "" {
+func (r *screenshotRunner) compressScreenshotWithImageMagick(path string) error {
+	if strings.TrimSpace(r.convertBin) == "" {
 		return nil
 	}
-	level := config.IntFromEnv("SCREENSHOT_PNGQUANT_QUALITY_MIN", 65, 0, 100)
-	maxLevel := config.IntFromEnv("SCREENSHOT_PNGQUANT_QUALITY_MAX", 90, 0, 100)
-	if level > maxLevel {
-		level, maxLevel = maxLevel, level
-	}
-	stdout, stderr, err := system.RunCommand(r.ctx, r.pngquantBin,
-		"--force",
-		"--skip-if-larger",
-		"--quality", fmt.Sprintf("%d-%d", level, maxLevel),
-		"--ext", ".png",
+	// 用 ImageMagick convert 压缩 PNG：先写出到临时文件，成功后再覆盖原文件
+	tempPath := path + ".im.tmp.png"
+	defer os.Remove(tempPath)
+
+	stdout, stderr, err := system.RunCommand(r.ctx, r.convertBin,
 		path,
+		"-colorspace", "sRGB",
+		"-type", "truecolor",
+		"-depth", "8",
+		"-define", "png:compression-level=9",
+		"-strip",
+		tempPath,
 	)
 	if err != nil {
 		return fmt.Errorf(system.BestErrorMessage(err, stderr, stdout))
 	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return err
+	}
 	if info, statErr := os.Stat(path); statErr == nil {
 		mb := float64(info.Size()) / 1024.0 / 1024.0
-		r.logf("[信息] pngquant PNG 压缩完成：%s 当前大小 %.2fMB (quality=%d-%d)", filepath.Base(path), mb, level, maxLevel)
+		r.logf("[信息] ImageMagick PNG 压缩完成：%s 当前大小 %.2fMB (truecolor depth=8)", filepath.Base(path), mb)
 	}
 	return nil
 }

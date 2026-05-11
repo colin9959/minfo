@@ -42,18 +42,20 @@ services:
     environment:
       PORT: "28080"
       REQUEST_TIMEOUT: "20m"
+      WEB_USERNAME: "admin"
+      WEB_PASSWORD: "passpass" # 请修改默认用户名密码
     volumes:
       - /lib/modules:/lib/modules:ro # 用于挂载 ISO，保持默认
       - /your/media/path1:/media_path1:ro
       - /your/media/path2:/media_path2:ro
     restart: unless-stopped
 ```
-
-启动：
-
+docker run 
 ```bash
-docker compose up -d
+docker run -d --name minfo --privileged -p 28080:28080 -e PORT="28080" -e WEB_USERNAME="admin" -e WEB_PASSWORD="passpass" -e REQUEST_TIMEOUT="20m" -v /lib/modules:/lib/modules:ro -v /your/media/path1:/media_path1:ro --restart unless-stopped ghcr.io/colin9959/minfo:latest
 ```
+其中：WEB_USERNAME和WEB_PASSWORD为用户名密码可自定义，/your/media/path1为视频所在目录，可映射多个路径。/lib/modules:/lib/modules:ro为挂载iso映射，保持默认即可。
+
 
 ## 运行要求
 
@@ -72,9 +74,9 @@ docker compose up -d
 
 ## 截图策略调整
 
-- 默认不挂载字幕（除非后续明确启用）
+- 快速模式需选择不挂载字幕
 - 截图时间点按影片时长使用固定步长生成
-- 单张 PNG 截图只有在 **大于 10MB** 时才会触发压缩
+- 单张 PNG 截图若大于 10MB 会触发压缩
 - 所有架构统一使用 `pngquant` 进行 PNG 压缩
 
 

@@ -155,7 +155,7 @@ type screenshotRunner struct {
 	ffprobeBin       string
 	mediainfoBin     string
 	bdsubBin         string
-	pngquantBin      string
+	convertBin       string
 	logLines         []string
 	logHandler       LogHandler
 
@@ -287,8 +287,8 @@ func (r *screenshotRunner) init(timestamps []string) error {
 	if bin, binErr := system.ResolveBin(system.BDSubBinaryPath); binErr == nil {
 		r.bdsubBin = bin
 	}
-	if bin, binErr := system.ResolveOptionalBin(system.PNGQuantBinaryPath); binErr == nil {
-		r.pngquantBin = bin
+	if bin, binErr := system.ResolveOptionalBin(system.ConvertBinaryPath); binErr == nil {
+		r.convertBin = bin
 	}
 
 	r.requested, err = parseRequestedTimestamps(timestamps)
@@ -340,10 +340,10 @@ func (r *screenshotRunner) init(timestamps []string) error {
 	r.videoWidth, r.videoHeight = r.detectVideoDimensions()
 	r.trueWidth, r.trueHeight = r.detectTrueResolution(r.videoWidth, r.videoHeight)
 	r.aspectChain = r.detectDisplayAspectFilter()
-	if strings.TrimSpace(r.pngquantBin) != "" {
-		r.logf("[信息] PNG 压缩统一使用 pngquant。")
+	if strings.TrimSpace(r.convertBin) != "" {
+		r.logf("[信息] PNG 压缩统一使用 ImageMagick convert。")
 	} else {
-		r.logf("[提示] 未检测到 pngquant，将跳过额外 PNG 压缩。")
+		r.logf("[提示] 未检测到 ImageMagick convert，将跳过额外 PNG 压缩。")
 	}
 
 	r.logf("[信息] 容器起始偏移：%.3fs | 影片总时长：%s", r.startOffset, secToHMS(r.duration))

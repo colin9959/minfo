@@ -1,8 +1,0 @@
-{
-    "[go]": {
-        "editor.detectIndentation": false,
-        "editor.insertSpaces": false,
-        "editor.tabSize": 4
-    },
-    "terminal.integrated.defaultProfile.linux": "bash"
-}
